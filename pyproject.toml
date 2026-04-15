@@ -20,7 +20,7 @@ dev = [
 ]
 
 [project.scripts]
-duplicate-issue-finder = "duplicate_issue_finder.cli:app"
+duplicate-issue-finder = "duplicate_issue_finder.cli:run"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

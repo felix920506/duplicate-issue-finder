@@ -13,6 +13,8 @@ class Settings:
 
 
 def load_settings() -> Settings:
+    if "/" not in os.environ["GITHUB_REPOSITORY"]:
+        raise ValueError("GITHUB_REPOSITORY must be in owner/name format")
     return Settings(
         github_token=os.environ["GITHUB_TOKEN"],
         github_repository=os.environ["GITHUB_REPOSITORY"],
