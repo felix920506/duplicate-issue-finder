@@ -64,7 +64,8 @@ def format_error_markdown(message: object) -> str:
 
 
 def format_success_markdown(formatted_output: str) -> str:
-    return "\n".join(["### Result", "", formatted_output])
+    markdown_output = formatted_output.replace("\n", "  \n")
+    return "\n".join(["### Result", "", markdown_output])
 
 
 def run_from_ui(
