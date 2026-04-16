@@ -50,6 +50,7 @@ class Settings:
     openai_api_key: str
     openai_model: str
     openai_base_url: str | None
+    agent_max_steps: int
 
 
 @dataclass(frozen=True)
@@ -324,6 +325,9 @@ def load_settings() -> Settings:
     repository = os.environ["GITHUB_REPOSITORY"]
     if "/" not in repository:
         raise ValueError("GITHUB_REPOSITORY must be in owner/name format")
+    agent_max_steps = int(os.environ.get("AGENT_MAX_STEPS", "6"))
+    if agent_max_steps < 1:
+        raise ValueError("AGENT_MAX_STEPS must be greater than 0")
     logger.info("Loaded configuration for repository %s", repository)
     return Settings(
         github_token=os.environ["GITHUB_TOKEN"],
@@ -331,6 +335,7 @@ def load_settings() -> Settings:
         openai_api_key=os.environ["OPENAI_API_KEY"],
         openai_model=os.environ.get("OPENAI_MODEL", "gpt-5-mini"),
         openai_base_url=os.environ.get("OPENAI_BASE_URL") or None,
+        agent_max_steps=agent_max_steps,
     )
 
 
@@ -462,6 +467,7 @@ def main() -> int:
             settings.openai_api_key,
             settings.openai_model,
             settings.openai_base_url,
+            settings.agent_max_steps,
         )
         decision = agent.run(args.issue_number)
     except KeyError as exc:
