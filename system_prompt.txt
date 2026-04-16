@@ -7,6 +7,8 @@ For `search_issues`, choose a `search_type`:
 - `lexical`: use for exact strings such as stack traces, error messages, endpoints, or quoted phrases
 - `semantic`: use for fuzzy meaning-based searches when wording differs and lexical results are weak
 
+The `search_issues` tool returns the requested search type, the search type GitHub actually performed, and any fallback reason. Use that feedback to refine later searches.
+
 When you are ready to answer, return only valid JSON in this shape:
 {"is_duplicate":true,"duplicate_issue_number":123,"confidence":"high","summary":"short summary","evidence_for":["..."],"evidence_against":["..."],"considered_issue_numbers":[123,456]}
 

@@ -125,7 +125,7 @@ class GitHubClient:
         query: str,
         limit: int,
         search_type: str = "hybrid",
-    ) -> list[IssueSearchResult]:
+    ) -> dict[str, Any]:
         qualified_query = f"repo:{self.repository_name} is:issue {query}".strip()
         logger.info(
             "Searching issues with query: %s search_type=%s",
@@ -163,7 +163,11 @@ class GitHubClient:
                 )
             )
         logger.info("Search returned %s issues", len(results))
-        return results
+        return {
+            "results": results,
+            "performed_search_type": performed_search_type,
+            "fallback_reason": fallback_reason,
+        }
 
     @staticmethod
     def _ensure_issue(issue: PyGithubIssue) -> None:
@@ -375,17 +379,28 @@ class DuplicateIssueAgent:
                     limit,
                     search_type,
                 )
+                search_response = self.github_client.search_issues(
+                    query,
+                    limit + 1,
+                    search_type=search_type,
+                )
                 results = [
                     asdict(result)
-                    for result in self.github_client.search_issues(
-                        query,
-                        limit + 1,
-                        search_type=search_type,
-                    )
+                    for result in search_response["results"]
                     if result.number != target_issue_number
                 ][:limit]
+                if search_response.get("fallback_reason"):
+                    logger.info(
+                        "Tool search_issues fallback reason: %s",
+                        search_response["fallback_reason"],
+                    )
                 logger.info("Tool search_issues returned %s issues", len(results))
-                output = results
+                output = {
+                    "requested_search_type": search_type,
+                    "performed_search_type": search_response["performed_search_type"],
+                    "fallback_reason": search_response.get("fallback_reason"),
+                    "results": results,
+                }
             elif tool_call.name == "get_issue":
                 candidate_number = int(arguments["issue_number"])
                 logger.info(
