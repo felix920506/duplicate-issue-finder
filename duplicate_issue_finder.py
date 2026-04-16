@@ -161,7 +161,16 @@ class DuplicateIssueAgent:
         logger.info("Starting duplicate detection for issue #%s", issue_number)
         target_issue = self.github_client.get_issue(issue_number)
         fetched_issues: dict[int, IssueDetails] = {issue_number: target_issue}
-        response = self._create_initial_response(target_issue)
+        conversation = self._build_initial_input(target_issue)
+        response = self._client.responses.create(
+            model=self.model,
+            input=conversation,
+            tools=self._build_tools(),
+            parallel_tool_calls=True,
+        )
+        logger.info(
+            "Received model response (%s characters)", len(response.output_text)
+        )
 
         for step in range(1, self.max_steps + 1):
             logger.info("Agent step %s/%s", step, self.max_steps)
@@ -171,13 +180,14 @@ class DuplicateIssueAgent:
                 return build_decision(parse_json_response(response.output_text))
 
             logger.info("Model requested %s tool calls", len(tool_calls))
+            conversation.extend(self._response_items_to_input(response))
             tool_outputs = self._execute_tool_calls(
                 issue_number, fetched_issues, tool_calls
             )
+            conversation.extend(tool_outputs)
             response = self._client.responses.create(
                 model=self.model,
-                previous_response_id=response.id,
-                input=tool_outputs,
+                input=conversation,
                 tools=self._build_tools(),
                 parallel_tool_calls=True,
             )
@@ -190,8 +200,8 @@ class DuplicateIssueAgent:
             "Agent reached the maximum number of steps without a final answer"
         )
 
-    def _create_initial_response(self, target_issue: IssueDetails):
-        logger.info("Requesting initial model response")
+    def _build_initial_input(self, target_issue: IssueDetails) -> list[dict[str, Any]]:
+        logger.info("Building initial model input")
         prompt = {
             "repository": self.github_client.repository_name,
             "target_issue": asdict(target_issue),
@@ -201,19 +211,10 @@ class DuplicateIssueAgent:
                 "max_steps": self.max_steps,
             },
         }
-        response = self._client.responses.create(
-            model=self.model,
-            input=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(prompt, indent=2)},
-            ],
-            tools=self._build_tools(),
-            parallel_tool_calls=True,
-        )
-        logger.info(
-            "Received model response (%s characters)", len(response.output_text)
-        )
-        return response
+        return [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps(prompt, indent=2)},
+        ]
 
     def _build_tools(self) -> list[dict[str, Any]]:
         return [
@@ -255,6 +256,16 @@ class DuplicateIssueAgent:
         for item in tool_calls:
             logger.info("Model requested tool=%s call_id=%s", item.name, item.call_id)
         return tool_calls
+
+    def _response_items_to_input(self, response: Any) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for item in response.output:
+            if hasattr(item, "model_dump"):
+                items.append(item.model_dump(exclude_none=True))
+            else:
+                items.append(dict(item))
+        logger.info("Converted %s response items into follow-up input", len(items))
+        return items
 
     def _execute_tool_calls(
         self,
