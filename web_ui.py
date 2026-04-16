@@ -14,6 +14,49 @@ from duplicate_issue_finder import (
 
 DEFAULT_CONCURRENCY_LIMIT = 4
 DEFAULT_MAX_QUEUE_SIZE = 32
+LOGS_ELEMENT_ID = "run-logs"
+AUTO_SCROLL_SCRIPT = f"""
+<script>
+(() => {{
+  const scrollLogsToBottom = () => {{
+    const container = document.getElementById('{LOGS_ELEMENT_ID}');
+    const textarea = container?.querySelector('textarea');
+    if (textarea) {{
+      textarea.scrollTop = textarea.scrollHeight;
+    }}
+  }};
+
+  const observeLogs = () => {{
+    const container = document.getElementById('{LOGS_ELEMENT_ID}');
+    const textarea = container?.querySelector('textarea');
+    if (!textarea || textarea.dataset.autoscrollAttached === 'true') {{
+      return;
+    }}
+
+    textarea.dataset.autoscrollAttached = 'true';
+    scrollLogsToBottom();
+    new MutationObserver(scrollLogsToBottom).observe(textarea, {{
+      childList: true,
+      characterData: true,
+      subtree: true,
+    }});
+    textarea.addEventListener('input', scrollLogsToBottom);
+  }};
+
+  const boot = () => {{
+    observeLogs();
+    scrollLogsToBottom();
+  }};
+
+  new MutationObserver(boot).observe(document.body, {{
+    childList: true,
+    subtree: true,
+  }});
+  window.addEventListener('load', boot);
+  setInterval(scrollLogsToBottom, 300);
+}})();
+</script>
+"""
 
 
 def format_error_markdown(message: object) -> str:
@@ -87,7 +130,7 @@ def run_from_ui(
 def build_demo() -> gr.Blocks:
     settings = load_settings()
 
-    with gr.Blocks(title="Duplicate Issue Finder") as demo:
+    with gr.Blocks(title="Duplicate Issue Finder", head=AUTO_SCROLL_SCRIPT) as demo:
         gr.Markdown(
             "# Duplicate Issue Finder\n"
             "Check whether a GitHub issue URL is likely a duplicate of another issue in the same repository."
@@ -127,6 +170,7 @@ def build_demo() -> gr.Blocks:
             label="Run Logs",
             lines=20,
             interactive=False,
+            elem_id=LOGS_ELEMENT_ID,
         )
 
         run_button.click(
