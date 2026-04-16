@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import queue
+import threading
 
 import gradio as gr
 
@@ -18,13 +20,17 @@ def format_error_markdown(message: object) -> str:
     return f"### Run failed\n\n```\n{message}\n```"
 
 
+def format_success_markdown(formatted_output: str) -> str:
+    return "\n".join(["### Result", "", formatted_output])
+
+
 def run_from_ui(
     issue_url: str,
     openai_model: str,
     verifier_model: str,
     agent_max_steps: float,
     search_max_results: float,
-) -> tuple[str, str, str]:
+):
     try:
         settings = apply_settings_overrides(
             load_settings(),
@@ -33,9 +39,6 @@ def run_from_ui(
             agent_max_steps=int(agent_max_steps),
             search_max_results=int(search_max_results),
         )
-        result, logs, error = run_duplicate_check_with_logs(
-            issue_url, settings=settings
-        )
     except Exception as exc:
         return (
             format_error_markdown(exc),
@@ -43,20 +46,47 @@ def run_from_ui(
             "",
         )
 
+    log_queue: queue.Queue[str] = queue.Queue()
+    state: dict[str, object] = {"result": None, "logs": "", "error": None}
+
+    def worker() -> None:
+        result, logs, error = run_duplicate_check_with_logs(
+            issue_url,
+            settings=settings,
+            log_sink=log_queue.put,
+        )
+        state["result"] = result
+        state["logs"] = logs
+        state["error"] = error
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+
+    collected_logs: list[str] = []
+    yield "### Running...", "", ""
+
+    while thread.is_alive() or not log_queue.empty():
+        try:
+            line = log_queue.get(timeout=0.2)
+            collected_logs.append(line)
+            yield "### Running...", "", "\n".join(collected_logs)
+        except queue.Empty:
+            continue
+
+    logs = str(state["logs"])
+    error = state["error"]
+    result = state["result"]
+
     if error is not None or result is None:
         message = error if error is not None else "Unknown error"
-        return (
-            format_error_markdown(message),
-            "",
-            logs,
-        )
+        yield format_error_markdown(message), "", logs
+        return
 
-    summary = [
-        "### Result",
-        "",
+    yield (
+        format_success_markdown(result.formatted_output),
         result.formatted_output,
-    ]
-    return "\n".join(summary), result.formatted_output, logs
+        logs,
+    )
 
 
 def build_demo() -> gr.Blocks:

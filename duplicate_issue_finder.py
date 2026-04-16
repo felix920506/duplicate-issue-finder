@@ -8,7 +8,7 @@ import os
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 from github import Auth, Github
@@ -24,6 +24,12 @@ logger = logging.getLogger(__name__)
 ACTIVE_LOG_MESSAGES: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
     "active_log_messages",
     default=None,
+)
+ACTIVE_LOG_SINK: contextvars.ContextVar[Callable[[str], None] | None] = (
+    contextvars.ContextVar(
+        "active_log_sink",
+        default=None,
+    )
 )
 SYSTEM_PROMPT = (
     (Path(__file__).with_name("system_prompt.txt")).read_text(encoding="utf-8").strip()
@@ -102,10 +108,13 @@ class DuplicateCheckResult:
 
 class ContextLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
+        message = self.format(record)
         messages = ACTIVE_LOG_MESSAGES.get()
-        if messages is None:
-            return
-        messages.append(self.format(record))
+        if messages is not None:
+            messages.append(message)
+        sink = ACTIVE_LOG_SINK.get()
+        if sink is not None:
+            sink(message)
 
 
 _context_handler = ContextLogHandler()
@@ -695,16 +704,19 @@ def run_duplicate_check_with_logs(
     issue_url_value: str,
     *,
     settings: Settings | None = None,
+    log_sink: Callable[[str], None] | None = None,
 ) -> tuple[DuplicateCheckResult | None, str, Exception | None]:
     messages: list[str] = []
-    token = ACTIVE_LOG_MESSAGES.set(messages)
+    messages_token = ACTIVE_LOG_MESSAGES.set(messages)
+    sink_token = ACTIVE_LOG_SINK.set(log_sink)
     try:
         result = run_duplicate_check(issue_url_value, settings=settings)
         return result, "\n".join(messages), None
     except Exception as exc:
         return None, "\n".join(messages), exc
     finally:
-        ACTIVE_LOG_MESSAGES.reset(token)
+        ACTIVE_LOG_MESSAGES.reset(messages_token)
+        ACTIVE_LOG_SINK.reset(sink_token)
 
 
 def parse_args() -> argparse.Namespace:

@@ -55,6 +55,7 @@ The web UI:
 - accepts an issue URL
 - lets you override model and search settings per request
 - shows the formatted result and per-run logs
+- streams log lines into the UI while a run is executing
 - uses Gradio's request queue so multiple users can run checks at the same time without sharing run state
 
 ## How It Works
