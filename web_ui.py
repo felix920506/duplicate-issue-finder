@@ -15,34 +15,47 @@ LOGS_ELEMENT_ID = "run-logs"
 AUTO_SCROLL_SCRIPT = f"""
 <script>
 (() => {{
-  const scrollLogsToBottom = () => {{
+  const getTextarea = () => {{
     const container = document.getElementById('{LOGS_ELEMENT_ID}');
-    const textarea = container?.querySelector('textarea');
-    if (textarea) {{
-      textarea.scrollTop = textarea.scrollHeight;
+    return container?.querySelector('textarea');
+  }};
+
+  const scrollLogsToBottom = (textarea) => {{
+    textarea.scrollTop = textarea.scrollHeight;
+  }};
+
+  const syncScrollOnNewContent = () => {{
+    const textarea = getTextarea();
+    if (!textarea) {{
+      return;
     }}
+
+    const previousLength = Number(textarea.dataset.previousLength || '0');
+    const currentLength = textarea.value.length;
+    if (currentLength > previousLength) {{
+      scrollLogsToBottom(textarea);
+    }}
+    textarea.dataset.previousLength = String(currentLength);
   }};
 
   const observeLogs = () => {{
-    const container = document.getElementById('{LOGS_ELEMENT_ID}');
-    const textarea = container?.querySelector('textarea');
+    const textarea = getTextarea();
     if (!textarea || textarea.dataset.autoscrollAttached === 'true') {{
       return;
     }}
 
     textarea.dataset.autoscrollAttached = 'true';
-    scrollLogsToBottom();
-    new MutationObserver(scrollLogsToBottom).observe(textarea, {{
-      childList: true,
-      characterData: true,
-      subtree: true,
+    textarea.dataset.previousLength = String(textarea.value.length);
+    new MutationObserver(syncScrollOnNewContent).observe(textarea, {{
+      attributes: true,
+      attributeFilter: ['value'],
     }});
-    textarea.addEventListener('input', scrollLogsToBottom);
+    textarea.addEventListener('input', syncScrollOnNewContent);
   }};
 
   const boot = () => {{
     observeLogs();
-    scrollLogsToBottom();
+    syncScrollOnNewContent();
   }};
 
   new MutationObserver(boot).observe(document.body, {{
@@ -50,7 +63,7 @@ AUTO_SCROLL_SCRIPT = f"""
     subtree: true,
   }});
   window.addEventListener('load', boot);
-  setInterval(scrollLogsToBottom, 300);
+  setInterval(syncScrollOnNewContent, 300);
 }})();
 </script>
 """
