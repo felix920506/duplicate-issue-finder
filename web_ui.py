@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import queue
+import re
 import threading
 
 import gradio as gr
@@ -60,8 +61,16 @@ def format_error_markdown(message: object) -> str:
 
 
 def format_success_markdown(formatted_output: str) -> str:
-    markdown_output = formatted_output.replace("\n", "  \n")
-    return "\n".join(["### Result", "", markdown_output])
+    linked_output = re.sub(
+        r"https://github\.com/[\w.-]+/[\w.-]+/issues/\d+",
+        lambda match: (
+            f'<a href="{match.group(0)}" target="_blank" rel="noopener noreferrer">'
+            f"{match.group(0)}</a>"
+        ),
+        formatted_output,
+    )
+    html_output = linked_output.replace("\n", "<br>\n")
+    return "\n".join(["### Result", "", html_output])
 
 
 def run_from_ui(
