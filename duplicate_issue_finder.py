@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any
 
 from github import Auth, Github
+from github.GithubException import UnknownObjectException
 from github.Issue import Issue as PyGithubIssue
 from openai import OpenAI
 
@@ -487,8 +488,16 @@ def main() -> int:
         )
         decision = agent.run(args.issue_number)
     except KeyError as exc:
-        logger.exception("Missing required configuration")
+        logger.error("Missing required configuration: %s", exc.args[0])
         print(f"Error: missing required environment variable {exc.args[0]}")
+        return 1
+    except UnknownObjectException:
+        logger.warning("Issue #%s was not found", args.issue_number)
+        print(f"Error: issue #{args.issue_number} was not found")
+        return 1
+    except ValueError as exc:
+        logger.warning("Input error: %s", exc)
+        print(f"Error: {exc}")
         return 1
     except Exception as exc:
         logger.exception("Duplicate detection failed")
