@@ -6,12 +6,23 @@ The CLI runs a bounded agent loop. The agent receives the target issue body and 
 
 ## Configuration
 
-Set these environment variables before running the CLI:
+Create a `.env` file in the repository root:
+
+```dotenv
+GITHUB_TOKEN=ghp_your_token
+GITHUB_REPOSITORY=owner/repo
+OPENAI_API_KEY=sk_your_key
+OPENAI_MODEL=gpt-5-mini
+OPENAI_BASE_URL=
+```
+
+Fields:
 
 - `GITHUB_TOKEN`: token with read access to the repository
 - `GITHUB_REPOSITORY`: repository in `owner/name` format
 - `OPENAI_API_KEY`: API key used for the agent loop
 - `OPENAI_MODEL`: optional; defaults to `gpt-5-mini`
+- `OPENAI_BASE_URL`: optional; set this if you want to use a non-default OpenAI-compatible endpoint
 
 ## Install
 

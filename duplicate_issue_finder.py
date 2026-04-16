@@ -42,6 +42,7 @@ class Settings:
     github_repository: str
     openai_api_key: str
     openai_model: str
+    openai_base_url: str | None
 
 
 @dataclass(frozen=True)
@@ -140,6 +141,7 @@ class DuplicateIssueAgent:
         github_client: GitHubClient,
         openai_api_key: str,
         model: str,
+        base_url: str | None = None,
         max_steps: int = 6,
         max_search_results: int = 5,
         max_fetched_candidates: int = 8,
@@ -149,7 +151,7 @@ class DuplicateIssueAgent:
         self.max_steps = max_steps
         self.max_search_results = max_search_results
         self.max_fetched_candidates = max_fetched_candidates
-        self._client = OpenAI(api_key=openai_api_key)
+        self._client = OpenAI(api_key=openai_api_key, base_url=base_url)
 
     def run(self, issue_number: int) -> DuplicateDecision:
         target_issue = self.github_client.get_issue(issue_number)
@@ -271,6 +273,7 @@ class DuplicateIssueAgent:
 
 
 def load_settings() -> Settings:
+    load_dotenv()
     repository = os.environ["GITHUB_REPOSITORY"]
     if "/" not in repository:
         raise ValueError("GITHUB_REPOSITORY must be in owner/name format")
@@ -279,7 +282,29 @@ def load_settings() -> Settings:
         github_repository=repository,
         openai_api_key=os.environ["OPENAI_API_KEY"],
         openai_model=os.environ.get("OPENAI_MODEL", "gpt-5-mini"),
+        openai_base_url=os.environ.get("OPENAI_BASE_URL") or None,
     )
+
+
+def load_dotenv(path: str = ".env") -> None:
+    if not os.path.exists(path):
+        return
+
+    with open(path, encoding="utf-8") as file:
+        for raw_line in file:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if not key or key in os.environ:
+                continue
+
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+                value = value[1:-1]
+            os.environ[key] = value
 
 
 def build_decision(payload: dict[str, Any]) -> DuplicateDecision:
@@ -362,6 +387,7 @@ def main() -> int:
             GitHubClient(settings.github_token, settings.github_repository),
             settings.openai_api_key,
             settings.openai_model,
+            settings.openai_base_url,
         )
         decision = agent.run(args.issue_number)
     except KeyError as exc:
