@@ -16,4 +16,6 @@ Rules:
 - Keep the final summary concise.
 
 Return only valid JSON in this shape:
-{"is_duplicate":true,"duplicate_issue_number":123,"confidence":"high","summary":"short summary","evidence_for":["..."],"evidence_against":["..."],"considered_issue_numbers":[123,456]}
+{"is_duplicate":true,"duplicate_issue_number":123,"confidence":84,"summary":"short summary","evidence_for":["..."],"evidence_against":["..."],"considered_issue_numbers":[123,456]}
+
+`confidence` must be a numeric percentage from 0 to 100.

@@ -90,7 +90,7 @@ class IssueSearchResult:
 @dataclass(frozen=True)
 class DuplicateDecision:
     is_duplicate: bool
-    confidence: str
+    confidence: int
     summary: str
     duplicate_issue_number: int | None
     evidence_for: list[str]
@@ -585,7 +585,7 @@ def build_decision(payload: dict[str, Any]) -> DuplicateDecision:
         )
     decision = DuplicateDecision(
         is_duplicate=bool(payload["is_duplicate"]),
-        confidence=str(payload["confidence"]),
+        confidence=parse_confidence_percentage(payload["confidence"]),
         summary=str(payload["summary"]),
         duplicate_issue_number=int(duplicate_issue_number)
         if duplicate_issue_number is not None
@@ -625,6 +625,26 @@ def parse_json_response(text: str) -> dict[str, Any]:
     return payload
 
 
+def parse_confidence_percentage(value: Any) -> int:
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+    else:
+        normalized = str(value).strip()
+        if normalized.endswith("%"):
+            normalized = normalized[:-1].strip()
+        try:
+            numeric = float(normalized)
+        except ValueError as exc:
+            raise ValueError(
+                f"Confidence must be a numeric percentage, got: {value}"
+            ) from exc
+
+    rounded = int(round(numeric))
+    if rounded < 0 or rounded > 100:
+        raise ValueError(f"Confidence must be between 0 and 100, got: {value}")
+    return rounded
+
+
 def format_decision(
     repository: str, issue_number: int, decision: DuplicateDecision
 ) -> str:
@@ -636,7 +656,7 @@ def format_decision(
     else:
         lines.append(f"Issue #{issue_number} does not appear to be a duplicate")
 
-    lines.append(f"Confidence: {decision.confidence}")
+    lines.append(f"Confidence: {decision.confidence}%")
     lines.append(f"Original: {issue_url(repository, issue_number)}")
     if decision.duplicate_issue_number is not None:
         lines.append(

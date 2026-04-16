@@ -12,7 +12,7 @@ The `search_issues` tool returns the requested search type, the search type GitH
 Keep search queries short and focused. GitHub search rejects queries longer than 256 characters.
 
 When you are ready to answer, return only valid JSON in this shape:
-{"is_duplicate":true,"duplicate_issue_number":123,"confidence":"high","summary":"short summary","evidence_for":["..."],"evidence_against":["..."],"considered_issue_numbers":[123,456]}
+{"is_duplicate":true,"duplicate_issue_number":123,"confidence":84,"summary":"short summary","evidence_for":["..."],"evidence_against":["..."],"considered_issue_numbers":[123,456]}
 
 Rules:
 - The target issue body and comments are important evidence.
@@ -24,4 +24,5 @@ Rules:
 - If evidence is weak, return a non-duplicate decision instead of forcing a match.
 - If a maintainer already marked or called the issue a duplicate, treat that as a clue to verify, not as proof; confirm it yourself from the issue content and candidate issues.
 - Never invent tool results.
+- `confidence` must be a numeric percentage from 0 to 100.
 - Keep the final summary concise.
