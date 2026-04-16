@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
-from github import Github
+from github import Auth, Github
 from github.Issue import Issue as PyGithubIssue
 from openai import OpenAI
 
@@ -88,7 +88,7 @@ class DuplicateDecision:
 class GitHubClient:
     def __init__(self, token: str, repository: str) -> None:
         self.repository_name = repository
-        self._client = Github(token)
+        self._client = Github(auth=Auth.Token(token))
         self._repository = self._client.get_repo(repository)
 
     def get_issue(self, issue_number: int) -> IssueDetails:
@@ -333,7 +333,16 @@ def parse_json_response(text: str) -> dict[str, Any]:
     if normalized.startswith("```"):
         normalized = normalized.split("\n", 1)[1]
         normalized = normalized.rsplit("```", 1)[0].strip()
-    return json.loads(normalized)
+
+    object_start = normalized.find("{")
+    if object_start == -1:
+        raise ValueError(f"Model did not return JSON: {text}")
+
+    decoder = json.JSONDecoder()
+    payload, _ = decoder.raw_decode(normalized[object_start:])
+    if not isinstance(payload, dict):
+        raise ValueError(f"Model returned non-object JSON: {payload}")
+    return payload
 
 
 def format_decision(issue_number: int, decision: DuplicateDecision) -> str:
