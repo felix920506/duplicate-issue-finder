@@ -6,6 +6,7 @@ import logging
 import os
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from github import Auth, Github
@@ -18,32 +19,9 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-SYSTEM_PROMPT = """
-You are a read-only agent that determines whether a target GitHub issue is a duplicate of an existing issue in the same repository.
-
-You must always return valid JSON with one of these shapes:
-
-Batch action:
-{"action":"batch","reason":"short reason","searches":[{"query":"search text","limit":5}],"issue_numbers":[123,456]}
-
-The searches array and issue_numbers array are both optional, but at least one must be present for a batch action.
-Use batch when you want to run multiple searches, fetch multiple issues, or both in one step.
-
-Final answer:
-{"action":"final","is_duplicate":true,"duplicate_issue_number":123,"confidence":"high","summary":"short summary","evidence_for":["..."],"evidence_against":["..."],"considered_issue_numbers":[123,456]}
-
-Rules:
-- The target issue body and comments are important evidence.
-- Distinguish duplicates from related issues.
-- Search both open and closed issues.
-- Prefer the older canonical issue when multiple issues describe the same underlying problem.
-- Only conclude duplicate when the overlap is concrete.
-- If evidence is weak, return a final non-duplicate decision instead of forcing a match.
-- If a maintainer already marked or called the issue a duplicate, treat that as a clue to verify, not as proof; confirm it yourself from the issue content and candidate issues.
-- Never reference tools that do not exist.
-- Prefer using batch efficiently when multiple searches or fetches are useful.
-""".strip()
+SYSTEM_PROMPT = (
+    (Path(__file__).with_name("system_prompt.txt")).read_text(encoding="utf-8").strip()
+)
 
 
 @dataclass(frozen=True)
