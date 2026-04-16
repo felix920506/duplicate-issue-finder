@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import contextvars
 import json
 import logging
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,10 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 logger = logging.getLogger(__name__)
+ACTIVE_LOG_MESSAGES: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "active_log_messages",
+    default=None,
+)
 SYSTEM_PROMPT = (
     (Path(__file__).with_name("system_prompt.txt")).read_text(encoding="utf-8").strip()
 )
@@ -85,6 +90,29 @@ class DuplicateDecision:
     evidence_for: list[str]
     evidence_against: list[str]
     considered_issue_numbers: list[int]
+
+
+@dataclass(frozen=True)
+class DuplicateCheckResult:
+    repository: str
+    issue_number: int
+    decision: DuplicateDecision
+    formatted_output: str
+
+
+class ContextLogHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        messages = ACTIVE_LOG_MESSAGES.get()
+        if messages is None:
+            return
+        messages.append(self.format(record))
+
+
+_context_handler = ContextLogHandler()
+_context_handler.setFormatter(
+    logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+)
+logging.getLogger().addHandler(_context_handler)
 
 
 class GitHubClient:
@@ -489,6 +517,30 @@ def load_settings() -> Settings:
     )
 
 
+def apply_settings_overrides(
+    settings: Settings,
+    *,
+    openai_model: str | None = None,
+    verifier_model: str | None = None,
+    agent_max_steps: int | None = None,
+    search_max_results: int | None = None,
+) -> Settings:
+    updated = settings
+    if openai_model:
+        updated = replace(updated, openai_model=openai_model)
+    if verifier_model is not None:
+        updated = replace(updated, verifier_model=verifier_model or None)
+    if agent_max_steps is not None:
+        if agent_max_steps < 1:
+            raise ValueError("AGENT_MAX_STEPS must be greater than 0")
+        updated = replace(updated, agent_max_steps=agent_max_steps)
+    if search_max_results is not None:
+        if search_max_results < 1:
+            raise ValueError("SEARCH_MAX_RESULTS must be greater than 0")
+        updated = replace(updated, search_max_results=search_max_results)
+    return updated
+
+
 def load_dotenv(path: str = ".env") -> None:
     if not os.path.exists(path):
         logger.info("No %s file found, using existing environment", path)
@@ -610,6 +662,51 @@ def issue_url(repository: str, issue_number: int) -> str:
     return f"https://github.com/{repository}/issues/{issue_number}"
 
 
+def run_duplicate_check(
+    issue_url_value: str,
+    *,
+    settings: Settings | None = None,
+) -> DuplicateCheckResult:
+    parsed_issue = parse_issue_url(issue_url_value)
+    active_settings = settings or load_settings()
+    agent = DuplicateIssueAgent(
+        GitHubClient(active_settings.github_token, parsed_issue.repository),
+        active_settings.openai_api_key,
+        active_settings.openai_model,
+        verifier_model=active_settings.verifier_model,
+        base_url=active_settings.openai_base_url,
+        max_steps=active_settings.agent_max_steps,
+        max_search_results=active_settings.search_max_results,
+    )
+    decision = agent.run(parsed_issue.issue_number)
+    return DuplicateCheckResult(
+        repository=parsed_issue.repository,
+        issue_number=parsed_issue.issue_number,
+        decision=decision,
+        formatted_output=format_decision(
+            parsed_issue.repository,
+            parsed_issue.issue_number,
+            decision,
+        ),
+    )
+
+
+def run_duplicate_check_with_logs(
+    issue_url_value: str,
+    *,
+    settings: Settings | None = None,
+) -> tuple[DuplicateCheckResult | None, str, Exception | None]:
+    messages: list[str] = []
+    token = ACTIVE_LOG_MESSAGES.set(messages)
+    try:
+        result = run_duplicate_check(issue_url_value, settings=settings)
+        return result, "\n".join(messages), None
+    except Exception as exc:
+        return None, "\n".join(messages), exc
+    finally:
+        ACTIVE_LOG_MESSAGES.reset(token)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Identify whether a GitHub issue is a likely duplicate."
@@ -649,17 +746,7 @@ def main() -> int:
             parsed_issue.repository,
             parsed_issue.issue_number,
         )
-        settings = load_settings()
-        agent = DuplicateIssueAgent(
-            GitHubClient(settings.github_token, parsed_issue.repository),
-            settings.openai_api_key,
-            settings.openai_model,
-            verifier_model=settings.verifier_model,
-            base_url=settings.openai_base_url,
-            max_steps=settings.agent_max_steps,
-            max_search_results=settings.search_max_results,
-        )
-        decision = agent.run(parsed_issue.issue_number)
+        result = run_duplicate_check(args.issue_url)
     except KeyError as exc:
         logger.error("Missing required configuration: %s", exc.args[0])
         print(f"Error: missing required environment variable {exc.args[0]}")
@@ -678,7 +765,7 @@ def main() -> int:
         return 1
 
     logger.info("Duplicate detection completed successfully")
-    print(format_decision(parsed_issue.repository, parsed_issue.issue_number, decision))
+    print(result.formatted_output)
     return 0
 
 
