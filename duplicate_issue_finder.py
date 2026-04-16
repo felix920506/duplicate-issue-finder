@@ -120,24 +120,48 @@ class GitHubClient:
             comments=comments,
         )
 
-    def search_issues(self, query: str, limit: int) -> list[IssueSearchResult]:
+    def search_issues(
+        self,
+        query: str,
+        limit: int,
+        search_type: str = "hybrid",
+    ) -> list[IssueSearchResult]:
         qualified_query = f"repo:{self.repository_name} is:issue {query}".strip()
-        logger.info("Searching issues with query: %s", qualified_query)
+        logger.info(
+            "Searching issues with query: %s search_type=%s",
+            qualified_query,
+            search_type,
+        )
+        parameters: dict[str, Any] = {"q": qualified_query, "per_page": limit}
+        if search_type != "lexical":
+            parameters["search_type"] = search_type
+
+        _, data = self._client._Github__requester.requestJsonAndCheck(
+            "GET",
+            "/search/issues",
+            parameters=parameters,
+        )
+
+        performed_search_type = data.get("search_type", "lexical")
+        logger.info("GitHub search performed as %s", performed_search_type)
+        fallback_reason = data.get("search_fallback_reason")
+        if fallback_reason:
+            logger.info("GitHub search fallback reason: %s", fallback_reason)
+
         results: list[IssueSearchResult] = []
-        for issue in self._client.search_issues(query=qualified_query):
-            self._ensure_issue(issue)
+        for issue in data.get("items", []):
+            if issue.get("pull_request") is not None:
+                continue
             results.append(
                 IssueSearchResult(
-                    number=issue.number,
-                    title=issue.title,
-                    state=issue.state,
-                    labels=[label.name for label in issue.labels],
-                    created_at=_isoformat(issue.created_at),
-                    updated_at=_isoformat(issue.updated_at),
+                    number=issue["number"],
+                    title=issue["title"],
+                    state=issue["state"],
+                    labels=[label["name"] for label in issue.get("labels", [])],
+                    created_at=issue.get("created_at"),
+                    updated_at=issue.get("updated_at"),
                 )
             )
-            if len(results) >= limit:
-                break
         logger.info("Search returned %s issues", len(results))
         return results
 
@@ -284,6 +308,11 @@ class DuplicateIssueAgent:
                             "minimum": 1,
                             "maximum": self.max_search_results,
                         },
+                        "search_type": {
+                            "type": "string",
+                            "enum": ["lexical", "hybrid", "semantic"],
+                            "default": "hybrid",
+                        },
                     },
                     "required": ["query", "limit"],
                     "additionalProperties": False,
@@ -335,12 +364,24 @@ class DuplicateIssueAgent:
                     max(int(arguments["limit"]), 1),
                     self.max_search_results,
                 )
+                search_type = str(arguments.get("search_type", "hybrid"))
+                if search_type not in {"lexical", "hybrid", "semantic"}:
+                    raise ValueError(
+                        f"Invalid search_type requested by model: {search_type}"
+                    )
                 logger.info(
-                    "Executing tool search_issues query=%r limit=%s", query, limit
+                    "Executing tool search_issues query=%r limit=%s search_type=%s",
+                    query,
+                    limit,
+                    search_type,
                 )
                 results = [
                     asdict(result)
-                    for result in self.github_client.search_issues(query, limit + 1)
+                    for result in self.github_client.search_issues(
+                        query,
+                        limit + 1,
+                        search_type=search_type,
+                    )
                     if result.number != target_issue_number
                 ][:limit]
                 logger.info("Tool search_issues returned %s issues", len(results))
