@@ -394,11 +394,17 @@ class DuplicateIssueAgent:
                         "Tool search_issues fallback reason: %s",
                         search_response["fallback_reason"],
                     )
+                if search_response.get("error"):
+                    logger.warning(
+                        "Tool search_issues error: %s",
+                        search_response["error"],
+                    )
                 logger.info("Tool search_issues returned %s issues", len(results))
                 output = {
                     "requested_search_type": search_type,
                     "performed_search_type": search_response["performed_search_type"],
                     "fallback_reason": search_response.get("fallback_reason"),
+                    "error": search_response.get("error"),
                     "results": results,
                 }
             elif tool_call.name == "get_issue":
