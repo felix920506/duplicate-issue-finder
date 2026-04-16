@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -10,6 +11,12 @@ from typing import Any
 from github import Auth, Github
 from github.Issue import Issue as PyGithubIssue
 from openai import OpenAI
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """
 You are a read-only agent that determines whether a target GitHub issue is a duplicate of an existing issue in the same repository.
@@ -88,16 +95,24 @@ class DuplicateDecision:
 class GitHubClient:
     def __init__(self, token: str, repository: str) -> None:
         self.repository_name = repository
+        logger.info("Initializing GitHub client for %s", repository)
         self._client = Github(auth=Auth.Token(token))
         self._repository = self._client.get_repo(repository)
 
     def get_issue(self, issue_number: int) -> IssueDetails:
+        logger.info("Fetching issue #%s", issue_number)
         issue = self._repository.get_issue(number=issue_number)
         self._ensure_issue(issue)
         comments = [
             IssueComment(author=comment.user.login, body=comment.body or "")
             for comment in issue.get_comments()
         ]
+        logger.info(
+            "Fetched issue #%s with %s comments and %s labels",
+            issue.number,
+            len(comments),
+            len(issue.labels),
+        )
         return IssueDetails(
             number=issue.number,
             title=issue.title,
@@ -112,6 +127,7 @@ class GitHubClient:
 
     def search_issues(self, query: str, limit: int) -> list[IssueSearchResult]:
         qualified_query = f"repo:{self.repository_name} is:issue {query}".strip()
+        logger.info("Searching issues with query: %s", qualified_query)
         results: list[IssueSearchResult] = []
         for issue in self._client.search_issues(query=qualified_query):
             self._ensure_issue(issue)
@@ -127,6 +143,7 @@ class GitHubClient:
             )
             if len(results) >= limit:
                 break
+        logger.info("Search returned %s issues", len(results))
         return results
 
     @staticmethod
@@ -151,15 +168,22 @@ class DuplicateIssueAgent:
         self.max_steps = max_steps
         self.max_search_results = max_search_results
         self.max_fetched_candidates = max_fetched_candidates
+        logger.info(
+            "Initializing OpenAI client with model=%s base_url=%s",
+            model,
+            base_url or "default",
+        )
         self._client = OpenAI(api_key=openai_api_key, base_url=base_url)
 
     def run(self, issue_number: int) -> DuplicateDecision:
+        logger.info("Starting duplicate detection for issue #%s", issue_number)
         target_issue = self.github_client.get_issue(issue_number)
         fetched_issues: dict[int, IssueDetails] = {issue_number: target_issue}
         search_history: list[dict[str, Any]] = []
         observations: list[dict[str, Any]] = []
 
         for step in range(1, self.max_steps + 1):
+            logger.info("Agent step %s/%s", step, self.max_steps)
             action = self._next_action(
                 target_issue,
                 fetched_issues,
@@ -168,6 +192,7 @@ class DuplicateIssueAgent:
                 step == self.max_steps,
             )
             name = action.get("action")
+            logger.info("Model selected action=%s", name)
 
             if name == "search_issues":
                 query = str(action["query"]).strip()
@@ -175,12 +200,14 @@ class DuplicateIssueAgent:
                     max(int(action.get("limit", self.max_search_results)), 1),
                     self.max_search_results,
                 )
+                logger.info("Executing search query=%r limit=%s", query, limit)
                 results = [
                     asdict(result)
                     for result in self.github_client.search_issues(query, limit + 1)
                     if result.number != issue_number
                 ][:limit]
                 search_history.append({"query": query, "results": results})
+                logger.info("Recorded %s search candidates", len(results))
                 observations.append(
                     {
                         "step": step,
@@ -194,7 +221,9 @@ class DuplicateIssueAgent:
 
             if name == "get_issue":
                 candidate_number = int(action["issue_number"])
+                logger.info("Fetching candidate issue #%s", candidate_number)
                 if candidate_number == issue_number:
+                    logger.warning("Model asked for the target issue as a candidate")
                     observations.append(
                         {
                             "step": step,
@@ -208,6 +237,9 @@ class DuplicateIssueAgent:
                     candidate_number not in fetched_issues
                     and len(fetched_issues) - 1 >= self.max_fetched_candidates
                 ):
+                    logger.warning(
+                        "Candidate fetch budget exhausted before #%s", candidate_number
+                    )
                     observations.append(
                         {
                             "step": step,
@@ -221,6 +253,11 @@ class DuplicateIssueAgent:
                     fetched_issues[candidate_number] = self.github_client.get_issue(
                         candidate_number
                     )
+                else:
+                    logger.info(
+                        "Candidate issue #%s already fetched, reusing cached copy",
+                        candidate_number,
+                    )
                 observations.append(
                     {
                         "step": step,
@@ -232,6 +269,7 @@ class DuplicateIssueAgent:
                 continue
 
             if name == "final":
+                logger.info("Model returned final decision")
                 return build_decision(action)
 
             raise ValueError(f"Unknown action returned by model: {name}")
@@ -246,6 +284,11 @@ class DuplicateIssueAgent:
         observations: list[dict[str, Any]],
         force_final: bool,
     ) -> dict[str, Any]:
+        logger.info(
+            "Requesting next action with %s fetched candidates and %s prior searches",
+            len(fetched_issues) - 1,
+            len(search_history),
+        )
         prompt = {
             "repository": self.github_client.repository_name,
             "target_issue": asdict(target_issue),
@@ -269,14 +312,19 @@ class DuplicateIssueAgent:
                 {"role": "user", "content": json.dumps(prompt, indent=2)},
             ],
         )
+        logger.info(
+            "Received model response (%s characters)", len(response.output_text)
+        )
         return parse_json_response(response.output_text)
 
 
 def load_settings() -> Settings:
+    logger.info("Loading configuration")
     load_dotenv()
     repository = os.environ["GITHUB_REPOSITORY"]
     if "/" not in repository:
         raise ValueError("GITHUB_REPOSITORY must be in owner/name format")
+    logger.info("Loaded configuration for repository %s", repository)
     return Settings(
         github_token=os.environ["GITHUB_TOKEN"],
         github_repository=repository,
@@ -288,7 +336,10 @@ def load_settings() -> Settings:
 
 def load_dotenv(path: str = ".env") -> None:
     if not os.path.exists(path):
+        logger.info("No %s file found, using existing environment", path)
         return
+
+    logger.info("Loading environment variables from %s", path)
 
     with open(path, encoding="utf-8") as file:
         for raw_line in file:
@@ -300,11 +351,14 @@ def load_dotenv(path: str = ".env") -> None:
             key = key.strip()
             value = value.strip()
             if not key or key in os.environ:
+                if key in os.environ:
+                    logger.info("Keeping existing environment value for %s", key)
                 continue
 
             if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
                 value = value[1:-1]
             os.environ[key] = value
+            logger.info("Loaded %s from %s", key, path)
 
 
 def build_decision(payload: dict[str, Any]) -> DuplicateDecision:
@@ -313,7 +367,7 @@ def build_decision(payload: dict[str, Any]) -> DuplicateDecision:
         raise ValueError(
             "Model marked issue as duplicate without a matching issue number"
         )
-    return DuplicateDecision(
+    decision = DuplicateDecision(
         is_duplicate=bool(payload["is_duplicate"]),
         confidence=str(payload["confidence"]),
         summary=str(payload["summary"]),
@@ -326,11 +380,20 @@ def build_decision(payload: dict[str, Any]) -> DuplicateDecision:
             int(item) for item in payload.get("considered_issue_numbers", [])
         ],
     )
+    logger.info(
+        "Built decision duplicate=%s match=%s confidence=%s",
+        decision.is_duplicate,
+        decision.duplicate_issue_number,
+        decision.confidence,
+    )
+    return decision
 
 
 def parse_json_response(text: str) -> dict[str, Any]:
+    logger.info("Parsing model response as JSON")
     normalized = text.strip()
     if normalized.startswith("```"):
+        logger.info("Stripping fenced code block from model response")
         normalized = normalized.split("\n", 1)[1]
         normalized = normalized.rsplit("```", 1)[0].strip()
 
@@ -342,6 +405,7 @@ def parse_json_response(text: str) -> dict[str, Any]:
     payload, _ = decoder.raw_decode(normalized[object_start:])
     if not isinstance(payload, dict):
         raise ValueError(f"Model returned non-object JSON: {payload}")
+    logger.info("Parsed JSON action=%s", payload.get("action"))
     return payload
 
 
@@ -391,6 +455,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
+        logger.info("Starting CLI for issue #%s", args.issue_number)
         settings = load_settings()
         agent = DuplicateIssueAgent(
             GitHubClient(settings.github_token, settings.github_repository),
@@ -400,12 +465,15 @@ def main() -> int:
         )
         decision = agent.run(args.issue_number)
     except KeyError as exc:
+        logger.exception("Missing required configuration")
         print(f"Error: missing required environment variable {exc.args[0]}")
         return 1
     except Exception as exc:
+        logger.exception("Duplicate detection failed")
         print(f"Error: {exc}")
         return 1
 
+    logger.info("Duplicate detection completed successfully")
     print(format_decision(args.issue_number, decision))
     return 0
 
