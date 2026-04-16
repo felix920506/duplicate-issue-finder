@@ -23,6 +23,11 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = (
     (Path(__file__).with_name("system_prompt.txt")).read_text(encoding="utf-8").strip()
 )
+VERIFIER_PROMPT = (
+    (Path(__file__).with_name("verifier_prompt.txt"))
+    .read_text(encoding="utf-8")
+    .strip()
+)
 
 
 @dataclass(frozen=True)
@@ -30,6 +35,7 @@ class Settings:
     github_token: str
     openai_api_key: str
     openai_model: str
+    verifier_model: str | None
     openai_base_url: str | None
     agent_max_steps: int
     search_max_results: int
@@ -147,6 +153,7 @@ class DuplicateIssueAgent:
         github_client: GitHubClient,
         openai_api_key: str,
         model: str,
+        verifier_model: str | None = None,
         base_url: str | None = None,
         max_steps: int = 6,
         max_search_results: int = 25,
@@ -154,6 +161,7 @@ class DuplicateIssueAgent:
     ) -> None:
         self.github_client = github_client
         self.model = model
+        self.verifier_model = verifier_model
         self.max_steps = max_steps
         self.max_search_results = max_search_results
         self.max_fetched_candidates = max_fetched_candidates
@@ -184,7 +192,12 @@ class DuplicateIssueAgent:
             tool_calls = self._extract_tool_calls(response)
             if not tool_calls:
                 logger.info("Model returned final decision")
-                return build_decision(parse_json_response(response.output_text))
+                decision = build_decision(parse_json_response(response.output_text))
+                return self._verify_decision_if_configured(
+                    target_issue,
+                    fetched_issues,
+                    decision,
+                )
 
             logger.info("Model requested %s tool calls", len(tool_calls))
             conversation.extend(self._response_items_to_input(response))
@@ -206,6 +219,39 @@ class DuplicateIssueAgent:
         raise RuntimeError(
             "Agent reached the maximum number of steps without a final answer"
         )
+
+    def _verify_decision_if_configured(
+        self,
+        target_issue: IssueDetails,
+        fetched_issues: dict[int, IssueDetails],
+        decision: DuplicateDecision,
+    ) -> DuplicateDecision:
+        if not self.verifier_model:
+            logger.info("No verifier model configured; skipping verification")
+            return decision
+
+        logger.info("Verifying decision with model=%s", self.verifier_model)
+        verifier_input = {
+            "repository": self.github_client.repository_name,
+            "target_issue": asdict(target_issue),
+            "primary_decision": asdict(decision),
+            "fetched_candidate_issues": [
+                asdict(issue)
+                for number, issue in fetched_issues.items()
+                if number != target_issue.number
+            ],
+        }
+        response = self._client.responses.create(
+            model=self.verifier_model,
+            input=[
+                {"role": "system", "content": VERIFIER_PROMPT},
+                {"role": "user", "content": json.dumps(verifier_input, indent=2)},
+            ],
+        )
+        logger.info(
+            "Received verifier response (%s characters)", len(response.output_text)
+        )
+        return build_decision(parse_json_response(response.output_text))
 
     def _build_initial_input(self, target_issue: IssueDetails) -> list[dict[str, Any]]:
         logger.info("Building initial model input")
@@ -355,6 +401,7 @@ def load_settings() -> Settings:
         github_token=os.environ["GITHUB_TOKEN"],
         openai_api_key=os.environ["OPENAI_API_KEY"],
         openai_model=os.environ.get("OPENAI_MODEL", "gpt-5-mini"),
+        verifier_model=(os.environ.get("VERIFIER_MODEL") or "").strip() or None,
         openai_base_url=os.environ.get("OPENAI_BASE_URL") or None,
         agent_max_steps=agent_max_steps,
         search_max_results=search_max_results,
@@ -515,9 +562,10 @@ def main() -> int:
             GitHubClient(settings.github_token, parsed_issue.repository),
             settings.openai_api_key,
             settings.openai_model,
-            settings.openai_base_url,
-            settings.agent_max_steps,
-            settings.search_max_results,
+            verifier_model=settings.verifier_model,
+            base_url=settings.openai_base_url,
+            max_steps=settings.agent_max_steps,
+            max_search_results=settings.search_max_results,
         )
         decision = agent.run(parsed_issue.issue_number)
     except KeyError as exc:
