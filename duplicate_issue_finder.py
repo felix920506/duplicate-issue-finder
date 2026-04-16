@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from github import Auth, Github
 from github.GithubException import UnknownObjectException
@@ -27,12 +28,17 @@ SYSTEM_PROMPT = (
 @dataclass(frozen=True)
 class Settings:
     github_token: str
-    github_repository: str
     openai_api_key: str
     openai_model: str
     openai_base_url: str | None
     agent_max_steps: int
     search_max_results: int
+
+
+@dataclass(frozen=True)
+class ParsedIssueUrl:
+    repository: str
+    issue_number: int
 
 
 @dataclass(frozen=True)
@@ -338,19 +344,15 @@ class DuplicateIssueAgent:
 def load_settings() -> Settings:
     logger.info("Loading configuration")
     load_dotenv()
-    repository = os.environ["GITHUB_REPOSITORY"]
-    if "/" not in repository:
-        raise ValueError("GITHUB_REPOSITORY must be in owner/name format")
     agent_max_steps = int(os.environ.get("AGENT_MAX_STEPS", "6"))
     if agent_max_steps < 1:
         raise ValueError("AGENT_MAX_STEPS must be greater than 0")
     search_max_results = int(os.environ.get("SEARCH_MAX_RESULTS", "25"))
     if search_max_results < 1:
         raise ValueError("SEARCH_MAX_RESULTS must be greater than 0")
-    logger.info("Loaded configuration for repository %s", repository)
+    logger.info("Loaded configuration")
     return Settings(
         github_token=os.environ["GITHUB_TOKEN"],
-        github_repository=repository,
         openai_api_key=os.environ["OPENAI_API_KEY"],
         openai_model=os.environ.get("OPENAI_MODEL", "gpt-5-mini"),
         openai_base_url=os.environ.get("OPENAI_BASE_URL") or None,
@@ -473,31 +475,58 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Identify whether a GitHub issue is a likely duplicate."
     )
-    parser.add_argument("issue_number", type=int)
+    parser.add_argument("issue_url")
     return parser.parse_args()
+
+
+def parse_issue_url(issue_url: str) -> ParsedIssueUrl:
+    parsed = urlparse(issue_url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("Issue URL must start with http:// or https://")
+    if parsed.netloc != "github.com":
+        raise ValueError("Issue URL must be a github.com issue URL")
+
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 4 or parts[2] != "issues":
+        raise ValueError(
+            "Issue URL must look like https://github.com/owner/repo/issues/123"
+        )
+
+    repository = f"{parts[0]}/{parts[1]}"
+    try:
+        issue_number = int(parts[3])
+    except ValueError as exc:
+        raise ValueError("Issue URL must end with a numeric issue number") from exc
+
+    return ParsedIssueUrl(repository=repository, issue_number=issue_number)
 
 
 def main() -> int:
     args = parse_args()
     try:
-        logger.info("Starting CLI for issue #%s", args.issue_number)
+        parsed_issue = parse_issue_url(args.issue_url)
+        logger.info(
+            "Starting CLI for %s issue #%s",
+            parsed_issue.repository,
+            parsed_issue.issue_number,
+        )
         settings = load_settings()
         agent = DuplicateIssueAgent(
-            GitHubClient(settings.github_token, settings.github_repository),
+            GitHubClient(settings.github_token, parsed_issue.repository),
             settings.openai_api_key,
             settings.openai_model,
             settings.openai_base_url,
             settings.agent_max_steps,
             settings.search_max_results,
         )
-        decision = agent.run(args.issue_number)
+        decision = agent.run(parsed_issue.issue_number)
     except KeyError as exc:
         logger.error("Missing required configuration: %s", exc.args[0])
         print(f"Error: missing required environment variable {exc.args[0]}")
         return 1
     except UnknownObjectException:
-        logger.warning("Issue #%s was not found", args.issue_number)
-        print(f"Error: issue #{args.issue_number} was not found")
+        logger.warning("Issue #%s was not found", parsed_issue.issue_number)
+        print(f"Error: issue #{parsed_issue.issue_number} was not found")
         return 1
     except ValueError as exc:
         logger.warning("Input error: %s", exc)
@@ -509,7 +538,7 @@ def main() -> int:
         return 1
 
     logger.info("Duplicate detection completed successfully")
-    print(format_decision(args.issue_number, decision))
+    print(format_decision(parsed_issue.issue_number, decision))
     return 0
 
 

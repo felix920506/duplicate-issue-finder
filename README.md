@@ -10,7 +10,6 @@ Create a `.env` file in the repository root:
 
 ```dotenv
 GITHUB_TOKEN=ghp_your_token
-GITHUB_REPOSITORY=owner/repo
 OPENAI_API_KEY=sk_your_key
 OPENAI_MODEL=gpt-5-mini
 OPENAI_BASE_URL=
@@ -21,7 +20,6 @@ SEARCH_MAX_RESULTS=25
 Fields:
 
 - `GITHUB_TOKEN`: token with read access to the repository
-- `GITHUB_REPOSITORY`: repository in `owner/name` format
 - `OPENAI_API_KEY`: API key used for the agent loop
 - `OPENAI_MODEL`: optional; defaults to `gpt-5-mini`
 - `OPENAI_BASE_URL`: optional; set this if you want to use a non-default OpenAI-compatible endpoint
@@ -37,10 +35,10 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
-python duplicate_issue_finder.py 1234
+python duplicate_issue_finder.py https://github.com/owner/repo/issues/1234
 ```
 
-The CLI prints whether the issue looks like a duplicate, the best matching issue if one was found, confidence, and a short explanation.
+The CLI infers the repository and issue number from the URL, then prints whether the issue looks like a duplicate, the best matching issue if one was found, confidence, and a short explanation.
 
 ## How It Works
 
