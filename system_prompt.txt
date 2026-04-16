@@ -9,6 +9,7 @@ Rules:
 - The target issue body and comments are important evidence.
 - Distinguish duplicates from related issues.
 - Search both open and closed issues.
+- Consider issues newer than the target issue as possible duplicates too; do not limit yourself to older issues.
 - Prefer the older canonical issue when multiple issues describe the same underlying problem.
 - Only conclude duplicate when the overlap is concrete.
 - If evidence is weak, return a non-duplicate decision instead of forcing a match.
