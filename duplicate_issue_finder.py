@@ -40,6 +40,7 @@ Rules:
 - Prefer the older canonical issue when multiple issues describe the same underlying problem.
 - Only conclude duplicate when the overlap is concrete.
 - If evidence is weak, return a final non-duplicate decision instead of forcing a match.
+- If a maintainer already marked or called the issue a duplicate, treat that as a clue to verify, not as proof; confirm it yourself from the issue content and candidate issues.
 - Never reference tools that do not exist.
 - Prefer using batch efficiently when multiple searches or fetches are useful.
 """.strip()
