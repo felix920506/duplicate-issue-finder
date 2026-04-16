@@ -406,9 +406,28 @@ class DuplicateIssueAgent:
                     }
                 else:
                     if candidate_number not in fetched_issues:
-                        fetched_issues[candidate_number] = self.github_client.get_issue(
-                            candidate_number
-                        )
+                        try:
+                            fetched_issues[candidate_number] = (
+                                self.github_client.get_issue(candidate_number)
+                            )
+                        except ValueError as exc:
+                            logger.warning(
+                                "Tool get_issue failed for #%s: %s",
+                                candidate_number,
+                                exc,
+                            )
+                            output = {
+                                "issue_number": candidate_number,
+                                "error": str(exc),
+                            }
+                            outputs.append(
+                                {
+                                    "type": "function_call_output",
+                                    "call_id": tool_call.call_id,
+                                    "output": json.dumps(output),
+                                }
+                            )
+                            continue
                     else:
                         logger.info(
                             "Candidate issue #%s already fetched, reusing cached copy",
