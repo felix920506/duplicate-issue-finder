@@ -32,6 +32,7 @@ class Settings:
     openai_model: str
     openai_base_url: str | None
     agent_max_steps: int
+    search_max_results: int
 
 
 @dataclass(frozen=True)
@@ -142,7 +143,7 @@ class DuplicateIssueAgent:
         model: str,
         base_url: str | None = None,
         max_steps: int = 6,
-        max_search_results: int = 5,
+        max_search_results: int = 25,
         max_fetched_candidates: int = 8,
     ) -> None:
         self.github_client = github_client
@@ -343,6 +344,9 @@ def load_settings() -> Settings:
     agent_max_steps = int(os.environ.get("AGENT_MAX_STEPS", "6"))
     if agent_max_steps < 1:
         raise ValueError("AGENT_MAX_STEPS must be greater than 0")
+    search_max_results = int(os.environ.get("SEARCH_MAX_RESULTS", "25"))
+    if search_max_results < 1:
+        raise ValueError("SEARCH_MAX_RESULTS must be greater than 0")
     logger.info("Loaded configuration for repository %s", repository)
     return Settings(
         github_token=os.environ["GITHUB_TOKEN"],
@@ -351,6 +355,7 @@ def load_settings() -> Settings:
         openai_model=os.environ.get("OPENAI_MODEL", "gpt-5-mini"),
         openai_base_url=os.environ.get("OPENAI_BASE_URL") or None,
         agent_max_steps=agent_max_steps,
+        search_max_results=search_max_results,
     )
 
 
@@ -483,6 +488,7 @@ def main() -> int:
             settings.openai_model,
             settings.openai_base_url,
             settings.agent_max_steps,
+            settings.search_max_results,
         )
         decision = agent.run(args.issue_number)
     except KeyError as exc:

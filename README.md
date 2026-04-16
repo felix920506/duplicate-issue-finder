@@ -15,6 +15,7 @@ OPENAI_API_KEY=sk_your_key
 OPENAI_MODEL=gpt-5-mini
 OPENAI_BASE_URL=
 AGENT_MAX_STEPS=6
+SEARCH_MAX_RESULTS=25
 ```
 
 Fields:
@@ -25,6 +26,7 @@ Fields:
 - `OPENAI_MODEL`: optional; defaults to `gpt-5-mini`
 - `OPENAI_BASE_URL`: optional; set this if you want to use a non-default OpenAI-compatible endpoint
 - `AGENT_MAX_STEPS`: optional; defaults to `6`
+- `SEARCH_MAX_RESULTS`: optional; defaults to `25`
 
 ## Install
 
