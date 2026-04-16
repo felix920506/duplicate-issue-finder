@@ -2,7 +2,7 @@
 
 Read-only CLI that inspects a configured GitHub repository and determines whether a target issue is likely a duplicate of an existing issue.
 
-The CLI runs a bounded agent loop. The agent receives the target issue body and comments, can search the issue tracker, can fetch candidate issues by number, and prints a final duplicate decision to stdout.
+The CLI runs a bounded agent loop. The agent receives the target issue body and comments, can search the issue tracker, can fetch candidate issues by number, can batch multiple searches and issue fetches into one step, and prints a final duplicate decision to stdout.
 
 ## Configuration
 
@@ -43,6 +43,6 @@ The CLI prints whether the issue looks like a duplicate, the best matching issue
 ## How It Works
 
 1. Fetch the target issue and its comments.
-2. Let the model iteratively choose between two read-only tools: `search_issues(query, limit)` and `get_issue(issue_number)`.
+2. Let the model iteratively run batched read-only work: multiple `search_issues(query, limit)` calls, multiple `get_issue(issue_number)` calls, or both in the same step.
 3. Stop after a small fixed number of steps.
 4. Print the final duplicate or non-duplicate decision.

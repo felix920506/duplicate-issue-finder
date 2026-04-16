@@ -21,13 +21,13 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = """
 You are a read-only agent that determines whether a target GitHub issue is a duplicate of an existing issue in the same repository.
 
-You may only take one action at a time and must always return valid JSON with one of these shapes:
+You must always return valid JSON with one of these shapes:
 
-Search action:
-{"action":"search_issues","reason":"short reason","query":"search text","limit":5}
+Batch action:
+{"action":"batch","reason":"short reason","searches":[{"query":"search text","limit":5}],"issue_numbers":[123,456]}
 
-Fetch action:
-{"action":"get_issue","reason":"short reason","issue_number":123}
+The searches array and issue_numbers array are both optional, but at least one must be present for a batch action.
+Use batch when you want to run multiple searches, fetch multiple issues, or both in one step.
 
 Final answer:
 {"action":"final","is_duplicate":true,"duplicate_issue_number":123,"confidence":"high","summary":"short summary","evidence_for":["..."],"evidence_against":["..."],"considered_issue_numbers":[123,456]}
@@ -40,6 +40,7 @@ Rules:
 - Only conclude duplicate when the overlap is concrete.
 - If evidence is weak, return a final non-duplicate decision instead of forcing a match.
 - Never reference tools that do not exist.
+- Prefer using batch efficiently when multiple searches or fetches are useful.
 """.strip()
 
 
@@ -195,78 +196,15 @@ class DuplicateIssueAgent:
             name = action.get("action")
             logger.info("Model selected action=%s", name)
 
-            if name == "search_issues":
-                query = str(action["query"]).strip()
-                limit = min(
-                    max(int(action.get("limit", self.max_search_results)), 1),
-                    self.max_search_results,
+            if name == "batch":
+                observation = self._execute_batch_action(
+                    step,
+                    issue_number,
+                    action,
+                    fetched_issues,
+                    search_history,
                 )
-                logger.info("Executing search query=%r limit=%s", query, limit)
-                results = [
-                    asdict(result)
-                    for result in self.github_client.search_issues(query, limit + 1)
-                    if result.number != issue_number
-                ][:limit]
-                search_history.append({"query": query, "results": results})
-                logger.info("Recorded %s search candidates", len(results))
-                observations.append(
-                    {
-                        "step": step,
-                        "action": "search_issues",
-                        "reason": action.get("reason", ""),
-                        "query": query,
-                        "results": results,
-                    }
-                )
-                continue
-
-            if name == "get_issue":
-                candidate_number = int(action["issue_number"])
-                logger.info("Fetching candidate issue #%s", candidate_number)
-                if candidate_number == issue_number:
-                    logger.warning("Model asked for the target issue as a candidate")
-                    observations.append(
-                        {
-                            "step": step,
-                            "action": "get_issue",
-                            "issue_number": candidate_number,
-                            "error": "The target issue cannot be fetched as a candidate.",
-                        }
-                    )
-                    continue
-                if (
-                    candidate_number not in fetched_issues
-                    and len(fetched_issues) - 1 >= self.max_fetched_candidates
-                ):
-                    logger.warning(
-                        "Candidate fetch budget exhausted before #%s", candidate_number
-                    )
-                    observations.append(
-                        {
-                            "step": step,
-                            "action": "get_issue",
-                            "issue_number": candidate_number,
-                            "error": "Candidate fetch budget exhausted.",
-                        }
-                    )
-                    continue
-                if candidate_number not in fetched_issues:
-                    fetched_issues[candidate_number] = self.github_client.get_issue(
-                        candidate_number
-                    )
-                else:
-                    logger.info(
-                        "Candidate issue #%s already fetched, reusing cached copy",
-                        candidate_number,
-                    )
-                observations.append(
-                    {
-                        "step": step,
-                        "action": "get_issue",
-                        "reason": action.get("reason", ""),
-                        "issue": asdict(fetched_issues[candidate_number]),
-                    }
-                )
+                observations.append(observation)
                 continue
 
             if name == "final":
@@ -276,6 +214,84 @@ class DuplicateIssueAgent:
             raise ValueError(f"Unknown action returned by model: {name}")
 
         raise RuntimeError("Agent loop ended without a final answer")
+
+    def _execute_batch_action(
+        self,
+        step: int,
+        target_issue_number: int,
+        action: dict[str, Any],
+        fetched_issues: dict[int, IssueDetails],
+        search_history: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        searches = action.get("searches", [])
+        issue_numbers = action.get("issue_numbers", [])
+        if not searches and not issue_numbers:
+            raise ValueError("Batch action must include searches or issue_numbers")
+
+        observation = {
+            "step": step,
+            "action": "batch",
+            "reason": action.get("reason", ""),
+            "searches": [],
+            "issues": [],
+        }
+
+        for item in searches:
+            query = str(item["query"]).strip()
+            limit = min(
+                max(int(item.get("limit", self.max_search_results)), 1),
+                self.max_search_results,
+            )
+            logger.info("Executing batched search query=%r limit=%s", query, limit)
+            results = [
+                asdict(result)
+                for result in self.github_client.search_issues(query, limit + 1)
+                if result.number != target_issue_number
+            ][:limit]
+            search_history.append({"query": query, "results": results})
+            logger.info(
+                "Recorded %s search candidates for query=%r", len(results), query
+            )
+            observation["searches"].append({"query": query, "results": results})
+
+        for raw_issue_number in issue_numbers:
+            candidate_number = int(raw_issue_number)
+            logger.info("Fetching batched candidate issue #%s", candidate_number)
+            if candidate_number == target_issue_number:
+                logger.warning("Model asked for the target issue as a candidate")
+                observation["issues"].append(
+                    {
+                        "issue_number": candidate_number,
+                        "error": "The target issue cannot be fetched as a candidate.",
+                    }
+                )
+                continue
+            if (
+                candidate_number not in fetched_issues
+                and len(fetched_issues) - 1 >= self.max_fetched_candidates
+            ):
+                logger.warning(
+                    "Candidate fetch budget exhausted before #%s", candidate_number
+                )
+                observation["issues"].append(
+                    {
+                        "issue_number": candidate_number,
+                        "error": "Candidate fetch budget exhausted.",
+                    }
+                )
+                continue
+            if candidate_number not in fetched_issues:
+                fetched_issues[candidate_number] = self.github_client.get_issue(
+                    candidate_number
+                )
+            else:
+                logger.info(
+                    "Candidate issue #%s already fetched, reusing cached copy",
+                    candidate_number,
+                )
+            observation["issues"].append(asdict(fetched_issues[candidate_number]))
+
+        return observation
 
     def _next_action(
         self,
