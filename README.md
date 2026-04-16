@@ -53,7 +53,6 @@ Then open `http://127.0.0.1:7860`.
 The web UI:
 
 - accepts an issue URL
-- shows the configured models and limits without allowing edits
 - shows the formatted result and per-run logs
 - streams log lines into the UI while a run is executing
 - uses the server-side `.env` configuration for models and limits
