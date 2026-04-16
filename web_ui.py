@@ -43,7 +43,6 @@ def run_from_ui(
         return (
             format_error_markdown(exc),
             "",
-            "",
         )
 
     log_queue: queue.Queue[str] = queue.Queue()
@@ -63,13 +62,13 @@ def run_from_ui(
     thread.start()
 
     collected_logs: list[str] = []
-    yield "### Running...", "", ""
+    yield "### Running...", ""
 
     while thread.is_alive() or not log_queue.empty():
         try:
             line = log_queue.get(timeout=0.2)
             collected_logs.append(line)
-            yield "### Running...", "", "\n".join(collected_logs)
+            yield "### Running...", "\n".join(collected_logs)
         except queue.Empty:
             continue
 
@@ -79,14 +78,10 @@ def run_from_ui(
 
     if error is not None or result is None:
         message = error if error is not None else "Unknown error"
-        yield format_error_markdown(message), "", logs
+        yield format_error_markdown(message), logs
         return
 
-    yield (
-        format_success_markdown(result.formatted_output),
-        result.formatted_output,
-        logs,
-    )
+    yield format_success_markdown(result.formatted_output), logs
 
 
 def build_demo() -> gr.Blocks:
@@ -128,11 +123,6 @@ def build_demo() -> gr.Blocks:
 
         run_button = gr.Button("Check for duplicates", variant="primary")
         result_markdown = gr.Markdown(label="Result")
-        formatted_output = gr.Textbox(
-            label="Formatted Output",
-            lines=16,
-            interactive=False,
-        )
         logs = gr.Textbox(
             label="Run Logs",
             lines=20,
@@ -148,7 +138,7 @@ def build_demo() -> gr.Blocks:
                 agent_max_steps,
                 search_max_results,
             ],
-            outputs=[result_markdown, formatted_output, logs],
+            outputs=[result_markdown, logs],
         )
 
     demo.queue(
