@@ -103,6 +103,8 @@ class DuplicateCheckResult:
     repository: str
     issue_number: int
     decision: DuplicateDecision
+    primary_decision: DuplicateDecision
+    verifier_decision: DuplicateDecision | None
     formatted_output: str
 
 
@@ -237,7 +239,9 @@ class DuplicateIssueAgent:
         )
         self._client = OpenAI(api_key=openai_api_key, base_url=base_url)
 
-    def run(self, issue_number: int) -> DuplicateDecision:
+    def run(
+        self, issue_number: int
+    ) -> tuple[DuplicateDecision, DuplicateDecision | None]:
         logger.info("Starting duplicate detection for issue #%s", issue_number)
         target_issue = self.github_client.get_issue(issue_number)
         fetched_issues: dict[int, IssueDetails] = {issue_number: target_issue}
@@ -257,12 +261,15 @@ class DuplicateIssueAgent:
             tool_calls = self._extract_tool_calls(response)
             if not tool_calls:
                 logger.info("Model returned final decision")
-                decision = build_decision(parse_json_response(response.output_text))
-                return self._verify_decision_if_configured(
+                primary_decision = build_decision(
+                    parse_json_response(response.output_text)
+                )
+                verifier_decision = self._verify_decision_if_configured(
                     target_issue,
                     fetched_issues,
-                    decision,
+                    primary_decision,
                 )
+                return primary_decision, verifier_decision
 
             logger.info("Model requested %s tool calls", len(tool_calls))
             conversation.extend(self._response_items_to_input(response))
@@ -290,10 +297,10 @@ class DuplicateIssueAgent:
         target_issue: IssueDetails,
         fetched_issues: dict[int, IssueDetails],
         decision: DuplicateDecision,
-    ) -> DuplicateDecision:
+    ) -> DuplicateDecision | None:
         if not self.verifier_model:
             logger.info("No verifier model configured; skipping verification")
-            return decision
+            return None
 
         logger.info("Verifying decision with model=%s", self.verifier_model)
         verifier_input = {
@@ -646,7 +653,12 @@ def parse_confidence_percentage(value: Any) -> int:
 
 
 def format_decision(
-    repository: str, issue_number: int, decision: DuplicateDecision
+    repository: str,
+    issue_number: int,
+    decision: DuplicateDecision,
+    *,
+    primary_decision: DuplicateDecision | None = None,
+    verifier_decision: DuplicateDecision | None = None,
 ) -> str:
     lines = []
     if decision.is_duplicate and decision.duplicate_issue_number is not None:
@@ -657,6 +669,10 @@ def format_decision(
         lines.append(f"Issue #{issue_number} does not appear to be a duplicate")
 
     lines.append(f"Confidence: {decision.confidence}%")
+    if primary_decision is not None:
+        lines.append(f"Primary confidence: {primary_decision.confidence}%")
+    if verifier_decision is not None:
+        lines.append(f"Verifier confidence: {verifier_decision.confidence}%")
     lines.append(f"Original: {issue_url(repository, issue_number)}")
     if decision.duplicate_issue_number is not None:
         lines.append(
@@ -707,15 +723,20 @@ def run_duplicate_check(
         max_steps=active_settings.agent_max_steps,
         max_search_results=active_settings.search_max_results,
     )
-    decision = agent.run(parsed_issue.issue_number)
+    primary_decision, verifier_decision = agent.run(parsed_issue.issue_number)
+    decision = verifier_decision or primary_decision
     return DuplicateCheckResult(
         repository=parsed_issue.repository,
         issue_number=parsed_issue.issue_number,
         decision=decision,
+        primary_decision=primary_decision,
+        verifier_decision=verifier_decision,
         formatted_output=format_decision(
             parsed_issue.repository,
             parsed_issue.issue_number,
             decision,
+            primary_decision=primary_decision,
+            verifier_decision=verifier_decision,
         ),
     )
 
