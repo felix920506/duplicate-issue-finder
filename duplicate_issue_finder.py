@@ -524,7 +524,9 @@ def parse_json_response(text: str) -> dict[str, Any]:
     return payload
 
 
-def format_decision(issue_number: int, decision: DuplicateDecision) -> str:
+def format_decision(
+    repository: str, issue_number: int, decision: DuplicateDecision
+) -> str:
     lines = []
     if decision.is_duplicate and decision.duplicate_issue_number is not None:
         lines.append(
@@ -534,6 +536,11 @@ def format_decision(issue_number: int, decision: DuplicateDecision) -> str:
         lines.append(f"Issue #{issue_number} does not appear to be a duplicate")
 
     lines.append(f"Confidence: {decision.confidence}")
+    lines.append(f"Original: {issue_url(repository, issue_number)}")
+    if decision.duplicate_issue_number is not None:
+        lines.append(
+            f"Best match: {issue_url(repository, decision.duplicate_issue_number)}"
+        )
     lines.append("")
     lines.append("Summary:")
     lines.append(decision.summary)
@@ -554,9 +561,13 @@ def format_decision(issue_number: int, decision: DuplicateDecision) -> str:
         lines.append("")
         lines.append("Considered issues:")
         for number in decision.considered_issue_numbers:
-            lines.append(f"- #{number}")
+            lines.append(f"- #{number}: {issue_url(repository, number)}")
 
     return "\n".join(lines)
+
+
+def issue_url(repository: str, issue_number: int) -> str:
+    return f"https://github.com/{repository}/issues/{issue_number}"
 
 
 def parse_args() -> argparse.Namespace:
@@ -627,7 +638,7 @@ def main() -> int:
         return 1
 
     logger.info("Duplicate detection completed successfully")
-    print(format_decision(parsed_issue.issue_number, decision))
+    print(format_decision(parsed_issue.repository, parsed_issue.issue_number, decision))
     return 0
 
 
