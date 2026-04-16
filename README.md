@@ -1,6 +1,6 @@
 # duplicate-issue-finder
 
-Read-only CLI that inspects a configured GitHub repository and determines whether a target issue is likely a duplicate of an existing issue.
+Read-only CLI and web UI that inspect a configured GitHub repository and determine whether a target issue is likely a duplicate of an existing issue.
 
 The CLI runs a bounded agent loop. The agent receives the target issue body and comments, uses native tool calling for issue search and issue fetches, chooses between lexical, hybrid, and semantic GitHub issue search per query, and prints a final duplicate decision to stdout.
 
@@ -41,6 +41,21 @@ python duplicate_issue_finder.py https://github.com/owner/repo/issues/1234
 ```
 
 The CLI infers the repository and issue number from the URL, then prints whether the issue looks like a duplicate, the best matching issue if one was found, confidence, and a short explanation.
+
+## Web UI
+
+```bash
+python web_ui.py
+```
+
+Then open `http://127.0.0.1:7860`.
+
+The web UI:
+
+- accepts an issue URL
+- lets you override model and search settings per request
+- shows the formatted result and per-run logs
+- uses Gradio's request queue so multiple users can run checks at the same time without sharing run state
 
 ## How It Works
 
