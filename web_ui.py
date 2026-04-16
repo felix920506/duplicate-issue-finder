@@ -6,11 +6,7 @@ import threading
 
 import gradio as gr
 
-from duplicate_issue_finder import (
-    apply_settings_overrides,
-    load_settings,
-    run_duplicate_check_with_logs,
-)
+from duplicate_issue_finder import load_settings, run_duplicate_check_with_logs
 
 DEFAULT_CONCURRENCY_LIMIT = 4
 DEFAULT_MAX_QUEUE_SIZE = 32
@@ -70,19 +66,9 @@ def format_success_markdown(formatted_output: str) -> str:
 
 def run_from_ui(
     issue_url: str,
-    openai_model: str,
-    verifier_model: str,
-    agent_max_steps: float,
-    search_max_results: float,
 ):
     try:
-        settings = apply_settings_overrides(
-            load_settings(),
-            openai_model=openai_model.strip() or None,
-            verifier_model=verifier_model.strip(),
-            agent_max_steps=int(agent_max_steps),
-            search_max_results=int(search_max_results),
-        )
+        settings = load_settings()
     except Exception as exc:
         return (
             format_error_markdown(exc),
@@ -142,29 +128,6 @@ def build_demo() -> gr.Blocks:
             placeholder="https://github.com/owner/repo/issues/1234",
         )
 
-        with gr.Accordion("Advanced Settings", open=False):
-            openai_model = gr.Textbox(
-                label="Main Model",
-                value=settings.openai_model,
-            )
-            verifier_model = gr.Textbox(
-                label="Verifier Model",
-                value=settings.verifier_model or "",
-                placeholder="Leave blank to disable verification",
-            )
-            agent_max_steps = gr.Number(
-                label="Agent Max Steps",
-                value=settings.agent_max_steps,
-                precision=0,
-                minimum=1,
-            )
-            search_max_results = gr.Number(
-                label="Search Max Results",
-                value=settings.search_max_results,
-                precision=0,
-                minimum=1,
-            )
-
         run_button = gr.Button("Check for duplicates", variant="primary")
         result_markdown = gr.Markdown(label="Result")
         logs = gr.Textbox(
@@ -176,13 +139,7 @@ def build_demo() -> gr.Blocks:
 
         run_button.click(
             fn=run_from_ui,
-            inputs=[
-                issue_url,
-                openai_model,
-                verifier_model,
-                agent_max_steps,
-                search_max_results,
-            ],
+            inputs=[issue_url],
             outputs=[result_markdown, logs],
         )
 
