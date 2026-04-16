@@ -161,145 +161,44 @@ class DuplicateIssueAgent:
         logger.info("Starting duplicate detection for issue #%s", issue_number)
         target_issue = self.github_client.get_issue(issue_number)
         fetched_issues: dict[int, IssueDetails] = {issue_number: target_issue}
-        search_history: list[dict[str, Any]] = []
-        observations: list[dict[str, Any]] = []
+        response = self._create_initial_response(target_issue)
 
         for step in range(1, self.max_steps + 1):
             logger.info("Agent step %s/%s", step, self.max_steps)
-            action = self._next_action(
-                target_issue,
-                fetched_issues,
-                search_history,
-                observations,
-                step == self.max_steps,
-            )
-            name = action.get("action")
-            logger.info("Model selected action=%s", name)
-
-            if name == "batch":
-                observation = self._execute_batch_action(
-                    step,
-                    issue_number,
-                    action,
-                    fetched_issues,
-                    search_history,
-                )
-                observations.append(observation)
-                continue
-
-            if name == "final":
+            tool_calls = self._extract_tool_calls(response)
+            if not tool_calls:
                 logger.info("Model returned final decision")
-                return build_decision(action)
+                return build_decision(parse_json_response(response.output_text))
 
-            raise ValueError(f"Unknown action returned by model: {name}")
-
-        raise RuntimeError("Agent loop ended without a final answer")
-
-    def _execute_batch_action(
-        self,
-        step: int,
-        target_issue_number: int,
-        action: dict[str, Any],
-        fetched_issues: dict[int, IssueDetails],
-        search_history: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        searches = action.get("searches", [])
-        issue_numbers = action.get("issue_numbers", [])
-        if not searches and not issue_numbers:
-            raise ValueError("Batch action must include searches or issue_numbers")
-
-        observation = {
-            "step": step,
-            "action": "batch",
-            "reason": action.get("reason", ""),
-            "searches": [],
-            "issues": [],
-        }
-
-        for item in searches:
-            query = str(item["query"]).strip()
-            limit = min(
-                max(int(item.get("limit", self.max_search_results)), 1),
-                self.max_search_results,
+            logger.info("Model requested %s tool calls", len(tool_calls))
+            tool_outputs = self._execute_tool_calls(
+                issue_number, fetched_issues, tool_calls
             )
-            logger.info("Executing batched search query=%r limit=%s", query, limit)
-            results = [
-                asdict(result)
-                for result in self.github_client.search_issues(query, limit + 1)
-                if result.number != target_issue_number
-            ][:limit]
-            search_history.append({"query": query, "results": results})
+            response = self._client.responses.create(
+                model=self.model,
+                previous_response_id=response.id,
+                input=tool_outputs,
+                tools=self._build_tools(),
+                parallel_tool_calls=True,
+            )
             logger.info(
-                "Recorded %s search candidates for query=%r", len(results), query
+                "Received follow-up model response (%s characters)",
+                len(response.output_text),
             )
-            observation["searches"].append({"query": query, "results": results})
 
-        for raw_issue_number in issue_numbers:
-            candidate_number = int(raw_issue_number)
-            logger.info("Fetching batched candidate issue #%s", candidate_number)
-            if candidate_number == target_issue_number:
-                logger.warning("Model asked for the target issue as a candidate")
-                observation["issues"].append(
-                    {
-                        "issue_number": candidate_number,
-                        "error": "The target issue cannot be fetched as a candidate.",
-                    }
-                )
-                continue
-            if (
-                candidate_number not in fetched_issues
-                and len(fetched_issues) - 1 >= self.max_fetched_candidates
-            ):
-                logger.warning(
-                    "Candidate fetch budget exhausted before #%s", candidate_number
-                )
-                observation["issues"].append(
-                    {
-                        "issue_number": candidate_number,
-                        "error": "Candidate fetch budget exhausted.",
-                    }
-                )
-                continue
-            if candidate_number not in fetched_issues:
-                fetched_issues[candidate_number] = self.github_client.get_issue(
-                    candidate_number
-                )
-            else:
-                logger.info(
-                    "Candidate issue #%s already fetched, reusing cached copy",
-                    candidate_number,
-                )
-            observation["issues"].append(asdict(fetched_issues[candidate_number]))
-
-        return observation
-
-    def _next_action(
-        self,
-        target_issue: IssueDetails,
-        fetched_issues: dict[int, IssueDetails],
-        search_history: list[dict[str, Any]],
-        observations: list[dict[str, Any]],
-        force_final: bool,
-    ) -> dict[str, Any]:
-        logger.info(
-            "Requesting next action with %s fetched candidates and %s prior searches",
-            len(fetched_issues) - 1,
-            len(search_history),
+        raise RuntimeError(
+            "Agent reached the maximum number of steps without a final answer"
         )
+
+    def _create_initial_response(self, target_issue: IssueDetails):
+        logger.info("Requesting initial model response")
         prompt = {
             "repository": self.github_client.repository_name,
             "target_issue": asdict(target_issue),
-            "already_fetched_candidates": [
-                asdict(issue)
-                for number, issue in fetched_issues.items()
-                if number != target_issue.number
-            ],
-            "search_history": search_history,
-            "observations": observations,
             "limits": {
                 "max_search_results_per_query": self.max_search_results,
                 "max_fetched_candidates": self.max_fetched_candidates,
-                "must_return_final": force_final,
+                "max_steps": self.max_steps,
             },
         }
         response = self._client.responses.create(
@@ -308,11 +207,120 @@ class DuplicateIssueAgent:
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": json.dumps(prompt, indent=2)},
             ],
+            tools=self._build_tools(),
+            parallel_tool_calls=True,
         )
         logger.info(
             "Received model response (%s characters)", len(response.output_text)
         )
-        return parse_json_response(response.output_text)
+        return response
+
+    def _build_tools(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "type": "function",
+                "name": "search_issues",
+                "description": "Search GitHub issues in the configured repository",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "limit": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": self.max_search_results,
+                        },
+                    },
+                    "required": ["query", "limit"],
+                    "additionalProperties": False,
+                },
+            },
+            {
+                "type": "function",
+                "name": "get_issue",
+                "description": "Fetch a GitHub issue by number from the configured repository",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "issue_number": {"type": "integer", "minimum": 1},
+                    },
+                    "required": ["issue_number"],
+                    "additionalProperties": False,
+                },
+            },
+        ]
+
+    def _extract_tool_calls(self, response: Any) -> list[Any]:
+        tool_calls = [item for item in response.output if item.type == "function_call"]
+        for item in tool_calls:
+            logger.info("Model requested tool=%s call_id=%s", item.name, item.call_id)
+        return tool_calls
+
+    def _execute_tool_calls(
+        self,
+        target_issue_number: int,
+        fetched_issues: dict[int, IssueDetails],
+        tool_calls: list[Any],
+    ) -> list[dict[str, str]]:
+        outputs: list[dict[str, str]] = []
+        for tool_call in tool_calls:
+            arguments = json.loads(tool_call.arguments)
+            if tool_call.name == "search_issues":
+                query = str(arguments["query"]).strip()
+                limit = min(
+                    max(int(arguments["limit"]), 1),
+                    self.max_search_results,
+                )
+                logger.info(
+                    "Executing tool search_issues query=%r limit=%s", query, limit
+                )
+                results = [
+                    asdict(result)
+                    for result in self.github_client.search_issues(query, limit + 1)
+                    if result.number != target_issue_number
+                ][:limit]
+                logger.info("Tool search_issues returned %s issues", len(results))
+                output = results
+            elif tool_call.name == "get_issue":
+                candidate_number = int(arguments["issue_number"])
+                logger.info(
+                    "Executing tool get_issue issue_number=%s", candidate_number
+                )
+                if candidate_number == target_issue_number:
+                    output = {
+                        "issue_number": candidate_number,
+                        "error": "The target issue cannot be fetched as a candidate.",
+                    }
+                elif (
+                    candidate_number not in fetched_issues
+                    and len(fetched_issues) - 1 >= self.max_fetched_candidates
+                ):
+                    output = {
+                        "issue_number": candidate_number,
+                        "error": "Candidate fetch budget exhausted.",
+                    }
+                else:
+                    if candidate_number not in fetched_issues:
+                        fetched_issues[candidate_number] = self.github_client.get_issue(
+                            candidate_number
+                        )
+                    else:
+                        logger.info(
+                            "Candidate issue #%s already fetched, reusing cached copy",
+                            candidate_number,
+                        )
+                    output = asdict(fetched_issues[candidate_number])
+            else:
+                raise ValueError(f"Unknown tool requested by model: {tool_call.name}")
+
+            outputs.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": tool_call.call_id,
+                    "output": json.dumps(output),
+                }
+            )
+        return outputs
 
 
 def load_settings() -> Settings:
