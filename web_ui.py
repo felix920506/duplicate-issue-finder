@@ -116,9 +116,11 @@ def format_success_markdown(formatted_output: str) -> str:
     return "\n".join(["### Result", "", html_output])
 
 
-def write_logs_to_file(logs: str) -> str | None:
+def write_logs_to_file(issue_url: str, logs: str) -> str | None:
     if not logs:
         return None
+
+    content = f"Issue URL: {issue_url}\n\n{logs}"
 
     with tempfile.NamedTemporaryFile(
         mode="w",
@@ -127,7 +129,7 @@ def write_logs_to_file(logs: str) -> str | None:
         prefix="duplicate-issue-finder-",
         delete=False,
     ) as file:
-        file.write(logs)
+        file.write(content)
         return file.name
 
 
@@ -284,14 +286,19 @@ def run_from_ui(
 
     if error is not None or result is None:
         message = error if error is not None else "Unknown error"
-        yield format_error_markdown(message), "", logs, write_logs_to_file(logs)
+        yield (
+            format_error_markdown(message),
+            "",
+            logs,
+            write_logs_to_file(issue_url, logs),
+        )
         return
 
     yield (
         format_success_markdown(result.formatted_output),
         build_action_buttons(result),
         logs,
-        write_logs_to_file(logs),
+        write_logs_to_file(issue_url, logs),
     )
 
 
