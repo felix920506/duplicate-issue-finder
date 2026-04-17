@@ -5,5 +5,12 @@ services:
     network_mode: bridge
     ports:
       - "7860:7860"
-    env_file:
-      - .env
+    environment:
+      GITHUB_TOKEN: ghp_your_token
+      OPENAI_API_KEY: sk_your_key
+      OPENAI_MODEL: gpt-5-mini
+      VERIFIER_MODEL: ""
+      OPENAI_BASE_URL: ""
+      AGENT_MAX_STEPS: "6"
+      SEARCH_MAX_RESULTS: "25"
+      TRUSTED_PROXIES: ""
