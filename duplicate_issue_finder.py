@@ -668,12 +668,12 @@ def format_decision(
     else:
         lines.append(f"Issue #{issue_number} does not appear to be a duplicate")
 
-    if verifier_decision is None:
-        lines.append(f"Confidence: {decision.confidence}%")
-    if primary_decision is not None:
-        lines.append(f"Primary confidence: {primary_decision.confidence}%")
-    if verifier_decision is not None:
-        lines.append(f"Confidence: {verifier_decision.confidence}%")
+    lines.append(f"Primary confidence: {(primary_decision or decision).confidence}%")
+    lines.append(
+        f"Verifier confidence: {verifier_decision.confidence}%"
+        if verifier_decision is not None
+        else "Verifier confidence: N/A"
+    )
     lines.append(f"Original: {issue_url(repository, issue_number)}")
     if decision.duplicate_issue_number is not None:
         lines.append(
