@@ -216,8 +216,9 @@ def run_from_ui(
         ensure_trusted_proxy(request, settings.trusted_proxies)
     except Exception as exc:
         logger.warning(
-            "Rejected or failed web UI request from %s: %s",
+            "Rejected or failed web UI request from %s for %s: %s",
             get_request_ip(request),
+            issue_url,
             exc,
         )
         return (
@@ -226,7 +227,11 @@ def run_from_ui(
             "",
         )
 
-    logger.info("Received web UI request from %s", get_request_ip(request))
+    logger.info(
+        "Received web UI request from %s for %s",
+        get_request_ip(request),
+        issue_url,
+    )
 
     log_queue: queue.Queue[str] = queue.Queue()
     state: dict[str, object] = {"result": None, "logs": "", "error": None}
