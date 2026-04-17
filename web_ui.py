@@ -84,7 +84,14 @@ AUTO_SCROLL_SCRIPT = f"""
     try {{
       const urls = JSON.parse(raw);
       for (const url of urls) {{
-        window.open(url, '_blank', 'noopener,noreferrer');
+        const link = document.createElement('a');
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
       }}
     }} catch (_error) {{
       console.error('Failed to open issue URLs');
