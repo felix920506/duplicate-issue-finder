@@ -2,6 +2,7 @@ services:
   duplicate-issue-finder:
     image: ghcr.io/felix920506/duplicate-issue-finder:latest
     restart: unless-stopped
+    network_mode: bridge
     ports:
       - "7860:7860"
     env_file:
