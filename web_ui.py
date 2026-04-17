@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import json
 import queue
 import re
 import threading
 
 import gradio as gr
 
-from duplicate_issue_finder import load_settings, run_duplicate_check_with_logs
+from duplicate_issue_finder import (
+    issue_url,
+    load_settings,
+    run_duplicate_check_with_logs,
+)
 
 DEFAULT_CONCURRENCY_LIMIT = 4
 DEFAULT_MAX_QUEUE_SIZE = 32
@@ -86,6 +91,58 @@ def format_success_markdown(formatted_output: str) -> str:
     return "\n".join(["### Result", "", html_output])
 
 
+def build_action_buttons(result) -> str:
+    original_url = issue_url(result.repository, result.issue_number)
+    best_match_url = None
+    if result.decision.duplicate_issue_number is not None:
+        best_match_url = issue_url(
+            result.repository, result.decision.duplicate_issue_number
+        )
+
+    all_urls: list[str] = [original_url]
+    if best_match_url is not None:
+        all_urls.append(best_match_url)
+    for number in result.decision.considered_issue_numbers:
+        candidate_url = issue_url(result.repository, number)
+        if candidate_url not in all_urls:
+            all_urls.append(candidate_url)
+
+    original_and_best = [original_url]
+    if best_match_url is not None:
+        original_and_best.append(best_match_url)
+
+    open_original_and_best = (
+        "window.open(%s, '_blank', 'noopener,noreferrer');" % json.dumps(original_url)
+    )
+    if best_match_url is not None:
+        open_original_and_best += (
+            "window.open(%s, '_blank', 'noopener,noreferrer');"
+            % json.dumps(best_match_url)
+        )
+
+    open_all = "".join(
+        "window.open(%s, '_blank', 'noopener,noreferrer');" % json.dumps(url)
+        for url in all_urls
+    )
+
+    return "\n".join(
+        [
+            '<div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin:0.5rem 0 1rem;">',
+            (
+                '<button type="button" style="padding:0.5rem 0.9rem;cursor:pointer;" '
+                f'onclick="{open_original_and_best}">'
+                f"Open original{'' if best_match_url is None else ' + best match'}"
+                "</button>"
+            ),
+            (
+                '<button type="button" style="padding:0.5rem 0.9rem;cursor:pointer;" '
+                f'onclick="{open_all}">Open all related issues</button>'
+            ),
+            "</div>",
+        ]
+    )
+
+
 def run_from_ui(
     issue_url: str,
 ):
@@ -94,6 +151,7 @@ def run_from_ui(
     except Exception as exc:
         return (
             format_error_markdown(exc),
+            "",
             "",
         )
 
@@ -114,13 +172,13 @@ def run_from_ui(
     thread.start()
 
     collected_logs: list[str] = []
-    yield "### Running...", ""
+    yield "### Running...", "", ""
 
     while thread.is_alive() or not log_queue.empty():
         try:
             line = log_queue.get(timeout=0.2)
             collected_logs.append(line)
-            yield "### Running...", "\n".join(collected_logs)
+            yield "### Running...", "", "\n".join(collected_logs)
         except queue.Empty:
             continue
 
@@ -130,10 +188,14 @@ def run_from_ui(
 
     if error is not None or result is None:
         message = error if error is not None else "Unknown error"
-        yield format_error_markdown(message), logs
+        yield format_error_markdown(message), "", logs
         return
 
-    yield format_success_markdown(result.formatted_output), logs
+    yield (
+        format_success_markdown(result.formatted_output),
+        build_action_buttons(result),
+        logs,
+    )
 
 
 def build_demo() -> gr.Blocks:
@@ -152,6 +214,7 @@ def build_demo() -> gr.Blocks:
 
         run_button = gr.Button("Check for duplicates", variant="primary")
         result_markdown = gr.Markdown(label="Result")
+        actions_html = gr.HTML()
         with gr.Accordion("Run Logs", open=False):
             logs = gr.Textbox(
                 label="Run Logs",
@@ -163,7 +226,7 @@ def build_demo() -> gr.Blocks:
         run_button.click(
             fn=run_from_ui,
             inputs=[issue_url],
-            outputs=[result_markdown, logs],
+            outputs=[result_markdown, actions_html, logs],
         )
 
     demo.queue(
