@@ -163,6 +163,7 @@ def run_from_ui(
             issue_url,
             settings=settings,
             log_sink=log_queue.put,
+            webui_mode=True,
         )
         state["result"] = result
         state["logs"] = logs

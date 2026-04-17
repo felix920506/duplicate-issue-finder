@@ -21,6 +21,10 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 logger = logging.getLogger(__name__)
+WEBUI_MODE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "webui_mode",
+    default=False,
+)
 ACTIVE_LOG_MESSAGES: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
     "active_log_messages",
     default=None,
@@ -110,6 +114,8 @@ class DuplicateCheckResult:
 
 class ContextLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
+        if getattr(record, "skip_context_handler", False):
+            return
         message = self.format(record)
         messages = ACTIVE_LOG_MESSAGES.get()
         if messages is not None:
@@ -126,22 +132,57 @@ _context_handler.setFormatter(
 logging.getLogger().addHandler(_context_handler)
 
 
+def log_runtime(
+    level: int,
+    message: str,
+    *args: Any,
+    webui_level: int | None = logging.DEBUG,
+) -> None:
+    effective_level = (
+        webui_level if WEBUI_MODE.get() and webui_level is not None else level
+    )
+    record = logger.makeRecord(
+        logger.name,
+        effective_level,
+        fn="",
+        lno=0,
+        msg=message,
+        args=args,
+        exc_info=None,
+        extra={"skip_context_handler": True},
+    )
+    formatted = _context_handler.format(record)
+    messages = ACTIVE_LOG_MESSAGES.get()
+    if messages is not None:
+        messages.append(formatted)
+    sink = ACTIVE_LOG_SINK.get()
+    if sink is not None:
+        sink(formatted)
+    logger.log(
+        effective_level,
+        message,
+        *args,
+        extra={"skip_context_handler": True},
+    )
+
+
 class GitHubClient:
     def __init__(self, token: str, repository: str) -> None:
         self.repository_name = repository
-        logger.info("Initializing GitHub client for %s", repository)
+        log_runtime(logging.INFO, "Initializing GitHub client for %s", repository)
         self._client = Github(auth=Auth.Token(token))
         self._repository = self._client.get_repo(repository)
 
     def get_issue(self, issue_number: int) -> IssueDetails:
-        logger.info("Fetching issue #%s", issue_number)
+        log_runtime(logging.INFO, "Fetching issue #%s", issue_number)
         issue = self._repository.get_issue(number=issue_number)
         self._ensure_issue(issue)
         comments = [
             IssueComment(author=comment.user.login, body=comment.body or "")
             for comment in issue.get_comments()
         ]
-        logger.info(
+        log_runtime(
+            logging.INFO,
             "Fetched issue #%s with %s comments and %s labels",
             issue.number,
             len(comments),
@@ -166,7 +207,8 @@ class GitHubClient:
         search_type: str = "hybrid",
     ) -> dict[str, Any]:
         qualified_query = f"repo:{self.repository_name} is:issue {query}".strip()
-        logger.info(
+        log_runtime(
+            logging.INFO,
             "Searching issues with query: %s search_type=%s",
             qualified_query,
             search_type,
@@ -182,10 +224,14 @@ class GitHubClient:
         )
 
         performed_search_type = data.get("search_type", "lexical")
-        logger.info("GitHub search performed as %s", performed_search_type)
+        log_runtime(
+            logging.INFO, "GitHub search performed as %s", performed_search_type
+        )
         fallback_reason = data.get("search_fallback_reason")
         if fallback_reason:
-            logger.info("GitHub search fallback reason: %s", fallback_reason)
+            log_runtime(
+                logging.INFO, "GitHub search fallback reason: %s", fallback_reason
+            )
 
         results: list[IssueSearchResult] = []
         for issue in data.get("items", []):
@@ -201,7 +247,7 @@ class GitHubClient:
                     updated_at=issue.get("updated_at"),
                 )
             )
-        logger.info("Search returned %s issues", len(results))
+        log_runtime(logging.INFO, "Search returned %s issues", len(results))
         return {
             "results": results,
             "performed_search_type": performed_search_type,
@@ -232,7 +278,8 @@ class DuplicateIssueAgent:
         self.max_steps = max_steps
         self.max_search_results = max_search_results
         self.max_fetched_candidates = max_fetched_candidates
-        logger.info(
+        log_runtime(
+            logging.INFO,
             "Initializing OpenAI client with model=%s base_url=%s",
             model,
             base_url or "default",
@@ -242,7 +289,9 @@ class DuplicateIssueAgent:
     def run(
         self, issue_number: int
     ) -> tuple[DuplicateDecision, DuplicateDecision | None]:
-        logger.info("Starting duplicate detection for issue #%s", issue_number)
+        log_runtime(
+            logging.INFO, "Starting duplicate detection for issue #%s", issue_number
+        )
         target_issue = self.github_client.get_issue(issue_number)
         fetched_issues: dict[int, IssueDetails] = {issue_number: target_issue}
         conversation = self._build_initial_input(target_issue)
@@ -252,15 +301,17 @@ class DuplicateIssueAgent:
             tools=self._build_tools(),
             parallel_tool_calls=True,
         )
-        logger.info(
-            "Received model response (%s characters)", len(response.output_text)
+        log_runtime(
+            logging.INFO,
+            "Received model response (%s characters)",
+            len(response.output_text),
         )
 
         for step in range(1, self.max_steps + 1):
-            logger.info("Agent step %s/%s", step, self.max_steps)
+            log_runtime(logging.INFO, "Agent step %s/%s", step, self.max_steps)
             tool_calls = self._extract_tool_calls(response)
             if not tool_calls:
-                logger.info("Model returned final decision")
+                log_runtime(logging.INFO, "Model returned final decision")
                 primary_decision = build_decision(
                     parse_json_response(response.output_text)
                 )
@@ -271,7 +322,7 @@ class DuplicateIssueAgent:
                 )
                 return primary_decision, verifier_decision
 
-            logger.info("Model requested %s tool calls", len(tool_calls))
+            log_runtime(logging.INFO, "Model requested %s tool calls", len(tool_calls))
             conversation.extend(self._response_items_to_input(response))
             tool_outputs = self._execute_tool_calls(
                 issue_number, fetched_issues, tool_calls
@@ -283,7 +334,8 @@ class DuplicateIssueAgent:
                 tools=self._build_tools(),
                 parallel_tool_calls=True,
             )
-            logger.info(
+            log_runtime(
+                logging.INFO,
                 "Received follow-up model response (%s characters)",
                 len(response.output_text),
             )
@@ -299,10 +351,14 @@ class DuplicateIssueAgent:
         decision: DuplicateDecision,
     ) -> DuplicateDecision | None:
         if not self.verifier_model:
-            logger.info("No verifier model configured; skipping verification")
+            log_runtime(
+                logging.INFO, "No verifier model configured; skipping verification"
+            )
             return None
 
-        logger.info("Verifying decision with model=%s", self.verifier_model)
+        log_runtime(
+            logging.INFO, "Verifying decision with model=%s", self.verifier_model
+        )
         verifier_input = {
             "repository": self.github_client.repository_name,
             "target_issue": asdict(target_issue),
@@ -320,13 +376,15 @@ class DuplicateIssueAgent:
                 {"role": "user", "content": json.dumps(verifier_input, indent=2)},
             ],
         )
-        logger.info(
-            "Received verifier response (%s characters)", len(response.output_text)
+        log_runtime(
+            logging.INFO,
+            "Received verifier response (%s characters)",
+            len(response.output_text),
         )
         return build_decision(parse_json_response(response.output_text))
 
     def _build_initial_input(self, target_issue: IssueDetails) -> list[dict[str, Any]]:
-        logger.info("Building initial model input")
+        log_runtime(logging.INFO, "Building initial model input")
         prompt = {
             "repository": self.github_client.repository_name,
             "target_issue": asdict(target_issue),
@@ -384,7 +442,12 @@ class DuplicateIssueAgent:
     def _extract_tool_calls(self, response: Any) -> list[Any]:
         tool_calls = [item for item in response.output if item.type == "function_call"]
         for item in tool_calls:
-            logger.info("Model requested tool=%s call_id=%s", item.name, item.call_id)
+            log_runtime(
+                logging.INFO,
+                "Model requested tool=%s call_id=%s",
+                item.name,
+                item.call_id,
+            )
         return tool_calls
 
     def _response_items_to_input(self, response: Any) -> list[dict[str, Any]]:
@@ -394,7 +457,9 @@ class DuplicateIssueAgent:
                 items.append(item.model_dump(exclude_none=True))
             else:
                 items.append(dict(item))
-        logger.info("Converted %s response items into follow-up input", len(items))
+        log_runtime(
+            logging.INFO, "Converted %s response items into follow-up input", len(items)
+        )
         return items
 
     def _execute_tool_calls(
@@ -417,7 +482,8 @@ class DuplicateIssueAgent:
                     raise ValueError(
                         f"Invalid search_type requested by model: {search_type}"
                     )
-                logger.info(
+                log_runtime(
+                    logging.INFO,
                     "Executing tool search_issues query=%r limit=%s search_type=%s",
                     query,
                     limit,
@@ -434,7 +500,8 @@ class DuplicateIssueAgent:
                     if result.number != target_issue_number
                 ][:limit]
                 if search_response.get("fallback_reason"):
-                    logger.info(
+                    log_runtime(
+                        logging.INFO,
                         "Tool search_issues fallback reason: %s",
                         search_response["fallback_reason"],
                     )
@@ -443,7 +510,9 @@ class DuplicateIssueAgent:
                         "Tool search_issues error: %s",
                         search_response["error"],
                     )
-                logger.info("Tool search_issues returned %s issues", len(results))
+                log_runtime(
+                    logging.INFO, "Tool search_issues returned %s issues", len(results)
+                )
                 output = {
                     "requested_search_type": search_type,
                     "performed_search_type": search_response["performed_search_type"],
@@ -453,8 +522,10 @@ class DuplicateIssueAgent:
                 }
             elif tool_call.name == "get_issue":
                 candidate_number = int(arguments["issue_number"])
-                logger.info(
-                    "Executing tool get_issue issue_number=%s", candidate_number
+                log_runtime(
+                    logging.INFO,
+                    "Executing tool get_issue issue_number=%s",
+                    candidate_number,
                 )
                 if candidate_number == target_issue_number:
                     output = {
@@ -494,7 +565,8 @@ class DuplicateIssueAgent:
                             )
                             continue
                     else:
-                        logger.info(
+                        log_runtime(
+                            logging.INFO,
                             "Candidate issue #%s already fetched, reusing cached copy",
                             candidate_number,
                         )
@@ -747,10 +819,12 @@ def run_duplicate_check_with_logs(
     *,
     settings: Settings | None = None,
     log_sink: Callable[[str], None] | None = None,
+    webui_mode: bool = False,
 ) -> tuple[DuplicateCheckResult | None, str, Exception | None]:
     messages: list[str] = []
     messages_token = ACTIVE_LOG_MESSAGES.set(messages)
     sink_token = ACTIVE_LOG_SINK.set(log_sink)
+    webui_token = WEBUI_MODE.set(webui_mode)
     try:
         result = run_duplicate_check(issue_url_value, settings=settings)
         return result, "\n".join(messages), None
@@ -759,6 +833,7 @@ def run_duplicate_check_with_logs(
     finally:
         ACTIVE_LOG_MESSAGES.reset(messages_token)
         ACTIVE_LOG_SINK.reset(sink_token)
+        WEBUI_MODE.reset(webui_token)
 
 
 def parse_args() -> argparse.Namespace:
