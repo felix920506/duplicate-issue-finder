@@ -16,6 +16,7 @@ VERIFIER_MODEL=
 OPENAI_BASE_URL=
 AGENT_MAX_STEPS=6
 SEARCH_MAX_RESULTS=25
+TRUSTED_PROXIES=
 ```
 
 Fields:
@@ -27,6 +28,7 @@ Fields:
 - `OPENAI_BASE_URL`: optional; set this if you want to use a non-default OpenAI-compatible endpoint
 - `AGENT_MAX_STEPS`: optional; defaults to `6`
 - `SEARCH_MAX_RESULTS`: optional; defaults to `25`
+- `TRUSTED_PROXIES`: optional comma-separated list of trusted reverse proxy IPs or CIDR ranges; if a request includes `X-Forwarded-For` from a direct client IP not on this list, the web UI rejects it
 
 ## Install
 

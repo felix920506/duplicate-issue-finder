@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import logging
 import queue
@@ -128,6 +129,46 @@ def get_request_ip(request: gr.Request | None) -> str:
     return "unknown"
 
 
+def get_direct_client_ip(request: gr.Request | None) -> str | None:
+    if request is None or request.client is None or not request.client.host:
+        return None
+    return request.client.host
+
+
+def parse_trusted_proxies(
+    entries: tuple[str, ...],
+) -> tuple[ipaddress._BaseNetwork, ...]:
+    networks: list[ipaddress._BaseNetwork] = []
+    for entry in entries:
+        try:
+            networks.append(ipaddress.ip_network(entry, strict=False))
+        except ValueError as exc:
+            raise ValueError(f"Invalid TRUSTED_PROXIES entry: {entry}") from exc
+    return tuple(networks)
+
+
+def ensure_trusted_proxy(
+    request: gr.Request | None, trusted_proxies: tuple[str, ...]
+) -> None:
+    if request is None:
+        return
+
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if not forwarded_for:
+        return
+
+    direct_client_ip = get_direct_client_ip(request)
+    if direct_client_ip is None:
+        raise PermissionError("Forwarded request missing direct client IP")
+
+    networks = parse_trusted_proxies(trusted_proxies)
+    direct_ip = ipaddress.ip_address(direct_client_ip)
+    if not any(direct_ip in network for network in networks):
+        raise PermissionError(
+            "Request included X-Forwarded-For from an untrusted proxy IP"
+        )
+
+
 def build_action_buttons(result) -> str:
     original_url = issue_url(result.repository, result.issue_number)
     best_match_url = None
@@ -170,15 +211,22 @@ def run_from_ui(
     issue_url: str,
     request: gr.Request,
 ):
-    logger.info("Received web UI request from %s", get_request_ip(request))
     try:
         settings = load_settings()
+        ensure_trusted_proxy(request, settings.trusted_proxies)
     except Exception as exc:
+        logger.warning(
+            "Rejected or failed web UI request from %s: %s",
+            get_request_ip(request),
+            exc,
+        )
         return (
             format_error_markdown(exc),
             "",
             "",
         )
+
+    logger.info("Received web UI request from %s", get_request_ip(request))
 
     log_queue: queue.Queue[str] = queue.Queue()
     state: dict[str, object] = {"result": None, "logs": "", "error": None}

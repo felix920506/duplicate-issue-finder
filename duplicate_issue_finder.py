@@ -54,6 +54,7 @@ class Settings:
     openai_base_url: str | None
     agent_max_steps: int
     search_max_results: int
+    trusted_proxies: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -602,6 +603,11 @@ def load_settings() -> Settings:
         openai_base_url=os.environ.get("OPENAI_BASE_URL") or None,
         agent_max_steps=agent_max_steps,
         search_max_results=search_max_results,
+        trusted_proxies=tuple(
+            entry.strip()
+            for entry in os.environ.get("TRUSTED_PROXIES", "").split(",")
+            if entry.strip()
+        ),
     )
 
 
