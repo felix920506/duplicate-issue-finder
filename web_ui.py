@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import queue
 import re
 import threading
@@ -14,6 +15,7 @@ from duplicate_issue_finder import (
     run_duplicate_check_with_logs,
 )
 
+logger = logging.getLogger(__name__)
 DEFAULT_CONCURRENCY_LIMIT = 4
 DEFAULT_MAX_QUEUE_SIZE = 32
 LOGS_ELEMENT_ID = "run-logs"
@@ -112,6 +114,20 @@ def format_success_markdown(formatted_output: str) -> str:
     return "\n".join(["### Result", "", html_output])
 
 
+def get_request_ip(request: gr.Request | None) -> str:
+    if request is None:
+        return "unknown"
+
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+
+    if request.client is not None and request.client.host:
+        return request.client.host
+
+    return "unknown"
+
+
 def build_action_buttons(result) -> str:
     original_url = issue_url(result.repository, result.issue_number)
     best_match_url = None
@@ -152,7 +168,9 @@ def build_action_buttons(result) -> str:
 
 def run_from_ui(
     issue_url: str,
+    request: gr.Request,
 ):
+    logger.info("Received web UI request from %s", get_request_ip(request))
     try:
         settings = load_settings()
     except Exception as exc:
