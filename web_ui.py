@@ -6,6 +6,7 @@ import json
 import logging
 import queue
 import re
+import tempfile
 import threading
 
 import gradio as gr
@@ -113,6 +114,21 @@ def format_success_markdown(formatted_output: str) -> str:
     )
     html_output = linked_output.replace("\n", "<br>\n")
     return "\n".join(["### Result", "", html_output])
+
+
+def write_logs_to_file(logs: str) -> str | None:
+    if not logs:
+        return None
+
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        suffix=".log",
+        prefix="duplicate-issue-finder-",
+        delete=False,
+    ) as file:
+        file.write(logs)
+        return file.name
 
 
 def get_request_ip(request: gr.Request | None) -> str:
@@ -225,6 +241,7 @@ def run_from_ui(
             format_error_markdown(exc),
             "",
             "",
+            None,
         )
 
     logger.info(
@@ -251,13 +268,13 @@ def run_from_ui(
     thread.start()
 
     collected_logs: list[str] = []
-    yield "### Running...", "", ""
+    yield "### Running...", "", "", None
 
     while thread.is_alive() or not log_queue.empty():
         try:
             line = log_queue.get(timeout=0.2)
             collected_logs.append(line)
-            yield "### Running...", "", "\n".join(collected_logs)
+            yield "### Running...", "", "\n".join(collected_logs), None
         except queue.Empty:
             continue
 
@@ -267,13 +284,14 @@ def run_from_ui(
 
     if error is not None or result is None:
         message = error if error is not None else "Unknown error"
-        yield format_error_markdown(message), "", logs
+        yield format_error_markdown(message), "", logs, write_logs_to_file(logs)
         return
 
     yield (
         format_success_markdown(result.formatted_output),
         build_action_buttons(result),
         logs,
+        write_logs_to_file(logs),
     )
 
 
@@ -295,6 +313,7 @@ def build_demo() -> gr.Blocks:
         result_markdown = gr.Markdown(label="Result")
         actions_html = gr.HTML()
         with gr.Accordion("Run Logs", open=False):
+            download_logs = gr.DownloadButton("Download logs")
             logs = gr.Textbox(
                 label="Run Logs",
                 lines=20,
@@ -305,7 +324,7 @@ def build_demo() -> gr.Blocks:
         run_button.click(
             fn=run_from_ui,
             inputs=[issue_url],
-            outputs=[result_markdown, actions_html, logs],
+            outputs=[result_markdown, actions_html, logs, download_logs],
         )
 
     demo.queue(
