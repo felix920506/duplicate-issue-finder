@@ -69,6 +69,27 @@ AUTO_SCROLL_SCRIPT = f"""
   }});
   window.addEventListener('load', boot);
   setInterval(syncScrollOnNewContent, 300);
+
+  document.addEventListener('click', (event) => {{
+    const button = event.target.closest('[data-open-urls]');
+    if (!button) {{
+      return;
+    }}
+
+    const raw = button.getAttribute('data-open-urls');
+    if (!raw) {{
+      return;
+    }}
+
+    try {{
+      const urls = JSON.parse(raw);
+      for (const url of urls) {{
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }}
+    }} catch (_error) {{
+      console.error('Failed to open issue URLs');
+    }}
+  }});
 }})();
 </script>
 """
@@ -111,32 +132,18 @@ def build_action_buttons(result) -> str:
     if best_match_url is not None:
         original_and_best.append(best_match_url)
 
-    open_original_and_best = (
-        "window.open(%s, '_blank', 'noopener,noreferrer');" % json.dumps(original_url)
-    )
-    if best_match_url is not None:
-        open_original_and_best += (
-            "window.open(%s, '_blank', 'noopener,noreferrer');"
-            % json.dumps(best_match_url)
-        )
-
-    open_all = "".join(
-        "window.open(%s, '_blank', 'noopener,noreferrer');" % json.dumps(url)
-        for url in all_urls
-    )
-
     return "\n".join(
         [
             '<div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin:0.5rem 0 1rem;">',
             (
                 '<button type="button" style="padding:0.5rem 0.9rem;cursor:pointer;" '
-                f'onclick="{open_original_and_best}">'
+                f"data-open-urls='{json.dumps(original_and_best)}'>"
                 f"Open original{'' if best_match_url is None else ' + best match'}"
                 "</button>"
             ),
             (
                 '<button type="button" style="padding:0.5rem 0.9rem;cursor:pointer;" '
-                f'onclick="{open_all}">Open all related issues</button>'
+                f"data-open-urls='{json.dumps(all_urls)}'>Open all related issues</button>"
             ),
             "</div>",
         ]
