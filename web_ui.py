@@ -152,12 +152,13 @@ def build_demo() -> gr.Blocks:
 
         run_button = gr.Button("Check for duplicates", variant="primary")
         result_markdown = gr.Markdown(label="Result")
-        logs = gr.Textbox(
-            label="Run Logs",
-            lines=20,
-            interactive=False,
-            elem_id=LOGS_ELEMENT_ID,
-        )
+        with gr.Accordion("Run Logs", open=False):
+            logs = gr.Textbox(
+                label="Run Logs",
+                lines=20,
+                interactive=False,
+                elem_id=LOGS_ELEMENT_ID,
+            )
 
         run_button.click(
             fn=run_from_ui,
