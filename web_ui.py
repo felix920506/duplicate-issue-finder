@@ -334,6 +334,11 @@ def build_demo() -> gr.Blocks:
             outputs=[result_markdown, actions_html, logs, download_logs],
         )
 
+        gr.HTML(
+            '<a href="https://github.com/felix920506/duplicate-issue-finder" '
+            'target="_blank" rel="noopener noreferrer">View on Github</a>'
+        )
+
     demo.queue(
         default_concurrency_limit=DEFAULT_CONCURRENCY_LIMIT,
         max_size=DEFAULT_MAX_QUEUE_SIZE,
