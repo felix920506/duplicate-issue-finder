@@ -333,6 +333,11 @@ def build_demo() -> gr.Blocks:
             inputs=[issue_url],
             outputs=[result_markdown, actions_html, logs, download_logs],
         )
+        issue_url.submit(
+            fn=run_from_ui,
+            inputs=[issue_url],
+            outputs=[result_markdown, actions_html, logs, download_logs],
+        )
 
         gr.HTML(
             '<a href="https://github.com/felix920506/duplicate-issue-finder" '
