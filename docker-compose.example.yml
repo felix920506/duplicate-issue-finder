@@ -1,5 +1,6 @@
 services:
   duplicate-issue-finder:
+    container_name: duplicate-issue-finder
     image: ghcr.io/felix920506/duplicate-issue-finder:latest
     restart: unless-stopped
     network_mode: bridge
