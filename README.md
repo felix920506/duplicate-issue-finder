@@ -57,6 +57,7 @@ The web UI:
 - accepts an issue URL
 - shows the formatted result and per-run logs
 - streams log lines into the UI while a run is executing
+- keeps a small in-memory cache of recent runs that can be reloaded from the UI
 - uses the server-side `.env` configuration for models and limits
 - uses Gradio's request queue so multiple users can run checks at the same time without sharing run state
 

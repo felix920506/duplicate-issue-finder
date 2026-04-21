@@ -8,6 +8,9 @@ import queue
 import re
 import tempfile
 import threading
+import time
+from collections import OrderedDict
+from dataclasses import dataclass
 
 import gradio as gr
 
@@ -20,6 +23,7 @@ from duplicate_issue_finder import (
 logger = logging.getLogger(__name__)
 DEFAULT_CONCURRENCY_LIMIT = 4
 DEFAULT_MAX_QUEUE_SIZE = 32
+MAX_CACHED_RUNS = 50
 LOGS_ELEMENT_ID = "run-logs"
 AUTO_SCROLL_SCRIPT = f"""
 <script>
@@ -99,6 +103,21 @@ AUTO_SCROLL_SCRIPT = f"""
 """
 
 
+@dataclass(frozen=True)
+class CachedRun:
+    run_id: str
+    issue_url: str
+    result_markdown: str
+    actions_html: str
+    logs: str
+    download_path: str | None
+    created_at: float
+
+
+RUN_CACHE: OrderedDict[str, CachedRun] = OrderedDict()
+RUN_CACHE_LOCK = threading.Lock()
+
+
 def format_error_markdown(message: object) -> str:
     return f"### Run failed\n\n```\n{message}\n```"
 
@@ -114,6 +133,70 @@ def format_success_markdown(formatted_output: str) -> str:
     )
     html_output = linked_output.replace("\n", "<br>\n")
     return "\n".join(["### Result", "", html_output])
+
+
+def build_cache_key(issue_url: str) -> str:
+    return f"{int(time.time() * 1000)}::{issue_url}"
+
+
+def store_cached_run(
+    issue_url: str,
+    result_markdown: str,
+    actions_html: str,
+    logs: str,
+    download_path: str | None,
+) -> None:
+    run_id = build_cache_key(issue_url)
+    cached = CachedRun(
+        run_id=run_id,
+        issue_url=issue_url,
+        result_markdown=result_markdown,
+        actions_html=actions_html,
+        logs=logs,
+        download_path=download_path,
+        created_at=time.time(),
+    )
+    with RUN_CACHE_LOCK:
+        RUN_CACHE[run_id] = cached
+        RUN_CACHE.move_to_end(run_id)
+        while len(RUN_CACHE) > MAX_CACHED_RUNS:
+            RUN_CACHE.popitem(last=False)
+
+
+def format_cached_run_label(cached_run: CachedRun) -> str:
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(cached_run.created_at))
+    return f"{timestamp} | {cached_run.issue_url}"
+
+
+def list_cached_run_choices() -> list[tuple[str, str]]:
+    with RUN_CACHE_LOCK:
+        runs = list(RUN_CACHE.values())
+    runs.reverse()
+    return [(format_cached_run_label(run), run.run_id) for run in runs]
+
+
+def get_cached_run(run_id: str) -> CachedRun | None:
+    with RUN_CACHE_LOCK:
+        cached = RUN_CACHE.get(run_id)
+        if cached is not None:
+            RUN_CACHE.move_to_end(run_id)
+        return cached
+
+
+def load_cached_run(run_id: str | None):
+    if not run_id:
+        return format_error_markdown("No cached run selected"), "", "", None
+
+    cached = get_cached_run(run_id)
+    if cached is None:
+        return format_error_markdown("Cached run not found"), "", "", None
+
+    return (
+        cached.result_markdown,
+        cached.actions_html,
+        cached.logs,
+        cached.download_path,
+    )
 
 
 def write_logs_to_file(issue_url: str, logs: str) -> str | None:
@@ -270,13 +353,13 @@ def run_from_ui(
     thread.start()
 
     collected_logs: list[str] = []
-    yield "### Running...", "", "", None
+    yield "### Running...", "", "", None, gr.update()
 
     while thread.is_alive() or not log_queue.empty():
         try:
             line = log_queue.get(timeout=0.2)
             collected_logs.append(line)
-            yield "### Running...", "", "\n".join(collected_logs), None
+            yield "### Running...", "", "\n".join(collected_logs), None, gr.update()
         except queue.Empty:
             continue
 
@@ -286,19 +369,28 @@ def run_from_ui(
 
     if error is not None or result is None:
         message = error if error is not None else "Unknown error"
+        result_markdown = format_error_markdown(message)
+        download_path = write_logs_to_file(issue_url, logs)
+        store_cached_run(issue_url, result_markdown, "", logs, download_path)
         yield (
-            format_error_markdown(message),
+            result_markdown,
             "",
             logs,
-            write_logs_to_file(issue_url, logs),
+            download_path,
+            gr.update(choices=list_cached_run_choices()),
         )
         return
 
+    result_markdown = format_success_markdown(result.formatted_output)
+    actions_html = build_action_buttons(result)
+    download_path = write_logs_to_file(issue_url, logs)
+    store_cached_run(issue_url, result_markdown, actions_html, logs, download_path)
     yield (
-        format_success_markdown(result.formatted_output),
-        build_action_buttons(result),
+        result_markdown,
+        actions_html,
         logs,
-        write_logs_to_file(issue_url, logs),
+        download_path,
+        gr.update(choices=list_cached_run_choices()),
     )
 
 
@@ -316,6 +408,14 @@ def build_demo() -> gr.Blocks:
             placeholder="https://github.com/owner/repo/issues/1234",
         )
 
+        recent_runs = gr.Dropdown(
+            label="Cached Runs",
+            choices=list_cached_run_choices(),
+            value=None,
+            allow_custom_value=False,
+        )
+        load_cached = gr.Button("Load cached run")
+
         run_button = gr.Button("Check for duplicates", variant="primary")
         result_markdown = gr.Markdown(label="Result")
         actions_html = gr.HTML()
@@ -331,11 +431,16 @@ def build_demo() -> gr.Blocks:
         run_button.click(
             fn=run_from_ui,
             inputs=[issue_url],
-            outputs=[result_markdown, actions_html, logs, download_logs],
+            outputs=[result_markdown, actions_html, logs, download_logs, recent_runs],
         )
         issue_url.submit(
             fn=run_from_ui,
             inputs=[issue_url],
+            outputs=[result_markdown, actions_html, logs, download_logs, recent_runs],
+        )
+        load_cached.click(
+            fn=load_cached_run,
+            inputs=[recent_runs],
             outputs=[result_markdown, actions_html, logs, download_logs],
         )
 
