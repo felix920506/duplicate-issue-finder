@@ -340,7 +340,14 @@ def run_from_ui(
     )
 
     log_queue: queue.Queue[str] = queue.Queue()
-    state: dict[str, object] = {"result": None, "logs": "", "error": None}
+    state: dict[str, object] = {
+        "result": None,
+        "logs": "",
+        "error": None,
+        "result_markdown": "",
+        "actions_html": "",
+        "download_path": None,
+    }
 
     def worker() -> None:
         result, logs, error = run_duplicate_check_with_logs(
@@ -352,6 +359,22 @@ def run_from_ui(
         state["result"] = result
         state["logs"] = logs
         state["error"] = error
+        if error is not None or result is None:
+            message = error if error is not None else "Unknown error"
+            state["result_markdown"] = format_error_markdown(message)
+            state["actions_html"] = ""
+        else:
+            state["result_markdown"] = format_success_markdown(result.formatted_output)
+            state["actions_html"] = build_action_buttons(result)
+
+        state["download_path"] = write_logs_to_file(issue_url, logs)
+        store_cached_run(
+            issue_url,
+            str(state["result_markdown"]),
+            str(state["actions_html"]),
+            logs,
+            state["download_path"] if isinstance(state["download_path"], str) else None,
+        )
 
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
@@ -368,32 +391,11 @@ def run_from_ui(
             continue
 
     logs = str(state["logs"])
-    error = state["error"]
-    result = state["result"]
-
-    if error is not None or result is None:
-        message = error if error is not None else "Unknown error"
-        result_markdown = format_error_markdown(message)
-        download_path = write_logs_to_file(issue_url, logs)
-        store_cached_run(issue_url, result_markdown, "", logs, download_path)
-        yield (
-            result_markdown,
-            "",
-            logs,
-            download_path,
-            gr.update(choices=list_cached_run_choices()),
-        )
-        return
-
-    result_markdown = format_success_markdown(result.formatted_output)
-    actions_html = build_action_buttons(result)
-    download_path = write_logs_to_file(issue_url, logs)
-    store_cached_run(issue_url, result_markdown, actions_html, logs, download_path)
     yield (
-        result_markdown,
-        actions_html,
+        str(state["result_markdown"]),
+        str(state["actions_html"]),
         logs,
-        download_path,
+        state["download_path"] if isinstance(state["download_path"], str) else None,
         gr.update(choices=list_cached_run_choices()),
     )
 
