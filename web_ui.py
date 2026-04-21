@@ -183,6 +183,10 @@ def get_cached_run(run_id: str) -> CachedRun | None:
         return cached
 
 
+def refresh_cached_run_choices():
+    return gr.update(choices=list_cached_run_choices())
+
+
 def load_cached_run(run_id: str | None):
     if not run_id:
         return format_error_markdown("No cached run selected"), "", "", None
@@ -442,6 +446,11 @@ def build_demo() -> gr.Blocks:
             fn=load_cached_run,
             inputs=[recent_runs],
             outputs=[result_markdown, actions_html, logs, download_logs],
+        )
+        demo.load(
+            fn=refresh_cached_run_choices,
+            inputs=None,
+            outputs=[recent_runs],
         )
 
         gr.HTML(
