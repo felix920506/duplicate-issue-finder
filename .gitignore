@@ -7,3 +7,7 @@ build/
 *.pyo
 *.pyd
 .env
+*.db
+*.sqlite
+*.sqlite3
+run-cache/
