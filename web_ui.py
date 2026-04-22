@@ -358,7 +358,7 @@ def run_from_ui(
 def build_demo() -> gr.Blocks:
     settings = load_settings()
 
-    with gr.Blocks(title="Duplicate Issue Finder", head=AUTO_SCROLL_SCRIPT) as demo:
+    with gr.Blocks(title="Duplicate Issue Finder") as demo:
         gr.Markdown(
             "# Duplicate Issue Finder\n"
             "Check whether a GitHub issue URL is likely a duplicate of another issue in the same repository."
@@ -434,7 +434,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     demo = build_demo()
-    demo.launch(server_name=args.host, server_port=args.port)
+    demo.launch(server_name=args.host, server_port=args.port, head=AUTO_SCROLL_SCRIPT)
     return 0
 
 
