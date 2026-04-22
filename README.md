@@ -17,6 +17,8 @@ OPENAI_BASE_URL=
 AGENT_MAX_STEPS=6
 SEARCH_MAX_RESULTS=25
 TRUSTED_PROXIES=
+CACHE_PROVIDER=sqlite
+CACHE_PATH=run-cache
 ```
 
 Fields:
@@ -29,6 +31,8 @@ Fields:
 - `AGENT_MAX_STEPS`: optional; defaults to `6`
 - `SEARCH_MAX_RESULTS`: optional; defaults to `25`
 - `TRUSTED_PROXIES`: optional comma-separated list of trusted reverse proxy IPs or CIDR ranges; if a request includes `X-Forwarded-For` from a direct client IP not on this list, the web UI rejects it
+- `CACHE_PROVIDER`: optional; `sqlite` by default, or `memory` to use the original in-memory cache
+- `CACHE_PATH`: optional; for `sqlite`, can be either a directory path or a database file path; defaults to `run-cache`
 
 ## Install
 

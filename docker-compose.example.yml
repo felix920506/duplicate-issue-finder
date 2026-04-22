@@ -16,3 +16,5 @@ services:
       # AGENT_MAX_STEPS: "6"
       # SEARCH_MAX_RESULTS: "25"
       # TRUSTED_PROXIES: ""
+      # CACHE_PROVIDER: sqlite
+      # CACHE_PATH: run-cache

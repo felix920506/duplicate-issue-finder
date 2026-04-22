@@ -11,7 +11,7 @@ import threading
 
 import gradio as gr
 
-from cache_provider import InMemoryRunCache
+from cache_provider import RunCache, create_run_cache
 
 from duplicate_issue_finder import (
     issue_url,
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_CONCURRENCY_LIMIT = 4
 DEFAULT_MAX_QUEUE_SIZE = 32
 LOGS_ELEMENT_ID = "run-logs"
+RUN_CACHE: RunCache | None = None
 AUTO_SCROLL_SCRIPT = f"""
 <script>
 (() => {{
@@ -101,9 +102,6 @@ AUTO_SCROLL_SCRIPT = f"""
 """
 
 
-RUN_CACHE = InMemoryRunCache(max_runs=50)
-
-
 def format_error_markdown(message: object) -> str:
     return f"### Run failed\n\n```\n{message}\n```"
 
@@ -122,7 +120,8 @@ def format_success_markdown(formatted_output: str) -> str:
 
 
 def list_cached_run_choices() -> list[tuple[str, str]]:
-    return [(RUN_CACHE.format_label(run), run.run_id) for run in RUN_CACHE.list_recent()]
+    cache = get_run_cache()
+    return [(cache.format_label(run), run.run_id) for run in cache.list_recent()]
 
 
 def refresh_cached_run_choices():
@@ -133,7 +132,7 @@ def load_cached_run(run_id: str | None):
     if not run_id:
         return format_error_markdown("No cached run selected"), "", "", None
 
-    cached = RUN_CACHE.get(run_id)
+    cached = get_run_cache().get(run_id)
     if cached is None:
         return format_error_markdown("Cached run not found"), "", "", None
 
@@ -141,8 +140,20 @@ def load_cached_run(run_id: str | None):
         cached.result_markdown,
         cached.actions_html,
         cached.logs,
-        cached.download_path,
+        write_logs_to_file(cached.issue_url, cached.logs),
     )
+
+
+def get_run_cache() -> RunCache:
+    global RUN_CACHE
+    if RUN_CACHE is None:
+        settings = load_settings()
+        RUN_CACHE = create_run_cache(
+            settings.cache_provider,
+            settings.cache_path,
+            max_runs=50,
+        )
+    return RUN_CACHE
 
 
 def write_logs_to_file(issue_url: str, logs: str) -> str | None:
@@ -313,12 +324,11 @@ def run_from_ui(
             state["actions_html"] = build_action_buttons(result)
 
         state["download_path"] = write_logs_to_file(issue_url, logs)
-        RUN_CACHE.store(
+        get_run_cache().store(
             issue_url,
             str(state["result_markdown"]),
             str(state["actions_html"]),
             logs,
-            state["download_path"] if isinstance(state["download_path"], str) else None,
         )
 
     thread = threading.Thread(target=worker, daemon=True)

@@ -55,6 +55,8 @@ class Settings:
     agent_max_steps: int
     search_max_results: int
     trusted_proxies: tuple[str, ...]
+    cache_provider: str
+    cache_path: str
 
 
 @dataclass(frozen=True)
@@ -608,6 +610,8 @@ def load_settings() -> Settings:
             for entry in os.environ.get("TRUSTED_PROXIES", "").split(",")
             if entry.strip()
         ),
+        cache_provider=os.environ.get("CACHE_PROVIDER", "sqlite"),
+        cache_path=os.environ.get("CACHE_PATH", "run-cache"),
     )
 
 
