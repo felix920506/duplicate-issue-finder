@@ -308,6 +308,9 @@ def build_action_buttons(result) -> str:
                 f"data-open-urls='{json.dumps(all_urls)}'>Open all related issues</button>"
             ),
             "</div>",
+            '<div style="font-size:0.9rem;color:#666;margin:-0.25rem 0 1rem;">'
+            "Your browser may block opening multiple tabs at once and ask for confirmation."
+            "</div>",
         ]
     )
 
