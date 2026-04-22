@@ -8,7 +8,7 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY duplicate_issue_finder.py web_ui.py system_prompt.txt verifier_prompt.txt ./
+COPY duplicate_issue_finder.py web_ui.py cache_provider.py system_prompt.txt verifier_prompt.txt ./
 
 EXPOSE 7860
 
