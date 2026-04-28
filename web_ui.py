@@ -363,6 +363,9 @@ def build_demo() -> gr.Blocks:
             "# Duplicate Issue Finder\n"
             "Check whether a GitHub issue URL is likely a duplicate of another issue in the same repository."
         )
+        gr.Markdown(
+            f"Main model: `{settings.openai_model}`, Verifier model: `{settings.verifier_model or 'N/A'}`"
+        )
 
         issue_url = gr.Textbox(
             label="Issue URL",
