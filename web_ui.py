@@ -24,9 +24,41 @@ DEFAULT_CONCURRENCY_LIMIT = 4
 DEFAULT_MAX_QUEUE_SIZE = 32
 LOGS_ELEMENT_ID = "run-logs"
 RUN_CACHE: RunCache | None = None
+ISSUE_URL_ELEM_ID = "issue-url-input"
 AUTO_SCROLL_SCRIPT = f"""
 <script>
 (() => {{
+  const ISSUE_URL_PATTERN = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+$/;
+
+  const setupUrlValidation = () => {{
+    const container = document.getElementById('{ISSUE_URL_ELEM_ID}');
+    if (!container || container.dataset.validationAttached === 'true') return;
+
+    const input = container.querySelector('input');
+    if (!input) return;
+
+    container.dataset.validationAttached = 'true';
+
+    let warning = document.getElementById('url-format-warning');
+    if (!warning) {{
+      warning = document.createElement('p');
+      warning.id = 'url-format-warning';
+      warning.style.cssText = 'color:#c0392b;font-size:0.85rem;margin:0.25rem 0 0;display:none;';
+      warning.textContent = 'Enter a valid GitHub issue URL: https://github.com/owner/repo/issues/N';
+      container.parentNode.insertBefore(warning, container.nextSibling);
+    }}
+
+    const validate = () => {{
+      const val = input.value.trim();
+      const invalid = val.length > 0 && !ISSUE_URL_PATTERN.test(val);
+      input.style.outline = invalid ? '2px solid #e74c3c' : '';
+      warning.style.display = invalid ? 'block' : 'none';
+    }};
+
+    input.addEventListener('input', validate);
+    validate();
+  }};
+
   const getTextarea = () => {{
     const container = document.getElementById('{LOGS_ELEMENT_ID}');
     return container?.querySelector('textarea');
@@ -68,6 +100,7 @@ AUTO_SCROLL_SCRIPT = f"""
   const boot = () => {{
     observeLogs();
     syncScrollOnNewContent();
+    setupUrlValidation();
   }};
 
   new MutationObserver(boot).observe(document.body, {{
@@ -374,6 +407,7 @@ def build_demo() -> gr.Blocks:
         issue_url = gr.Textbox(
             label="Issue URL",
             placeholder="https://github.com/owner/repo/issues/1234",
+            elem_id=ISSUE_URL_ELEM_ID,
         )
 
         run_button = gr.Button("Check for duplicates", variant="primary")
