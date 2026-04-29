@@ -34,6 +34,8 @@ class RunCache(Protocol):
 
     def list_recent(self) -> list[CachedRun]: ...
 
+    def get_latest_for_url(self, issue_url: str) -> CachedRun | None: ...
+
 
 class InMemoryRunCache:
     def __init__(self, max_runs: int = 50) -> None:
@@ -75,6 +77,12 @@ class InMemoryRunCache:
         runs.reverse()
         return runs
 
+    def get_latest_for_url(self, issue_url: str) -> CachedRun | None:
+        for run in self.list_recent():
+            if run.issue_url == issue_url:
+                return run
+        return None
+
 
 class SQLiteRunCache:
     def __init__(self, path: str, max_runs: int = 50) -> None:
@@ -100,6 +108,9 @@ class SQLiteRunCache:
             )
             self._connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_cached_runs_created_at ON cached_runs(created_at DESC)"
+            )
+            self._connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_cached_runs_issue_url ON cached_runs(issue_url, created_at DESC)"
             )
             try:
                 self._connection.execute(
@@ -168,6 +179,20 @@ class SQLiteRunCache:
                 (self.max_runs,),
             ).fetchall()
         return [row_to_cached_run(row) for row in rows]
+
+    def get_latest_for_url(self, issue_url: str) -> CachedRun | None:
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT run_id, issue_url, result_markdown, actions_html, logs, status, created_at
+                FROM cached_runs
+                WHERE issue_url = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (issue_url,),
+            ).fetchone()
+        return row_to_cached_run(row) if row is not None else None
 
 
 def create_run_cache(
