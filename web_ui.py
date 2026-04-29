@@ -386,7 +386,6 @@ def build_demo() -> gr.Blocks:
                 value=None,
                 allow_custom_value=False,
             )
-            load_cached = gr.Button("Load cached run")
         with gr.Accordion("Run Logs", open=False):
             download_logs = gr.DownloadButton("Download logs")
             logs = gr.Textbox(
@@ -406,7 +405,7 @@ def build_demo() -> gr.Blocks:
             inputs=[issue_url],
             outputs=[result_markdown, actions_html, logs, download_logs, recent_runs],
         )
-        load_cached.click(
+        recent_runs.change(
             fn=load_cached_run,
             inputs=[recent_runs],
             outputs=[result_markdown, actions_html, logs, download_logs],
