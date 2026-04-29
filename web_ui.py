@@ -355,7 +355,7 @@ def run_from_ui(
                 write_logs_to_file(cached.issue_url, cached.logs),
                 gr.update(),
                 gr.update(interactive=True),
-                gr.update(),
+                gr.update(visible=True),
             )
             return
 
@@ -406,13 +406,13 @@ def run_from_ui(
     thread.start()
 
     collected_logs: list[str] = []
-    yield "### Running...", "", "", None, gr.update(), gr.update(interactive=False), gr.update()
+    yield "### Running...", "", "", None, gr.update(), gr.update(interactive=False), gr.update(visible=False)
 
     while thread.is_alive() or not log_queue.empty():
         try:
             line = log_queue.get(timeout=0.2)
             collected_logs.append(line)
-            yield "### Running...", "", "\n".join(collected_logs), None, gr.update(), gr.update(interactive=False), gr.update()
+            yield "### Running...", "", "\n".join(collected_logs), None, gr.update(), gr.update(interactive=False), gr.update(visible=False)
         except queue.Empty:
             continue
 
@@ -424,8 +424,12 @@ def run_from_ui(
         state["download_path"] if isinstance(state["download_path"], str) else None,
         gr.update(choices=list_cached_run_choices()),
         gr.update(interactive=True),
-        gr.update(),
+        gr.update(visible=False),
     )
+
+
+def run_from_ui_force(issue_url: str, request: gr.Request):
+    yield from run_from_ui(issue_url, request, force=True)
 
 
 def build_demo() -> gr.Blocks:
@@ -448,6 +452,7 @@ def build_demo() -> gr.Blocks:
         )
 
         run_button = gr.Button("Check for duplicates", variant="primary")
+        force_rerun_button = gr.Button("Force re-run", variant="secondary", visible=False)
         result_markdown = gr.Markdown(
             label="Result",
             value="*Run a check or load a cached result to see output here.*",
@@ -469,15 +474,21 @@ def build_demo() -> gr.Blocks:
                 elem_id=LOGS_ELEMENT_ID,
             )
 
+        run_outputs = [result_markdown, actions_html, logs, download_logs, recent_runs, run_button, force_rerun_button]
         run_button.click(
             fn=run_from_ui,
             inputs=[issue_url],
-            outputs=[result_markdown, actions_html, logs, download_logs, recent_runs, run_button],
+            outputs=run_outputs,
         )
         issue_url.submit(
             fn=run_from_ui,
             inputs=[issue_url],
-            outputs=[result_markdown, actions_html, logs, download_logs, recent_runs, run_button],
+            outputs=run_outputs,
+        )
+        force_rerun_button.click(
+            fn=run_from_ui_force,
+            inputs=[issue_url],
+            outputs=run_outputs,
         )
         recent_runs.change(
             fn=load_cached_run,
