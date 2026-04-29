@@ -317,6 +317,7 @@ def build_action_buttons(result) -> str:
 def run_from_ui(
     issue_url: str,
     request: gr.Request,
+    force: bool = False,
 ):
     try:
         settings = load_settings()
@@ -342,6 +343,21 @@ def run_from_ui(
         get_request_ip(request),
         issue_url,
     )
+
+    if not force:
+        cached = get_run_cache().get_latest_for_url(issue_url)
+        if cached is not None:
+            logger.info("Serving cached result for %s (run_id=%s)", issue_url, cached.run_id)
+            yield (
+                cached.result_markdown,
+                cached.actions_html,
+                cached.logs,
+                write_logs_to_file(cached.issue_url, cached.logs),
+                gr.update(),
+                gr.update(interactive=True),
+                gr.update(),
+            )
+            return
 
     log_queue: queue.Queue[str] = queue.Queue()
     state: dict[str, object] = {
@@ -390,13 +406,13 @@ def run_from_ui(
     thread.start()
 
     collected_logs: list[str] = []
-    yield "### Running...", "", "", None, gr.update(), gr.update(interactive=False)
+    yield "### Running...", "", "", None, gr.update(), gr.update(interactive=False), gr.update()
 
     while thread.is_alive() or not log_queue.empty():
         try:
             line = log_queue.get(timeout=0.2)
             collected_logs.append(line)
-            yield "### Running...", "", "\n".join(collected_logs), None, gr.update(), gr.update(interactive=False)
+            yield "### Running...", "", "\n".join(collected_logs), None, gr.update(), gr.update(interactive=False), gr.update()
         except queue.Empty:
             continue
 
@@ -408,6 +424,7 @@ def run_from_ui(
         state["download_path"] if isinstance(state["download_path"], str) else None,
         gr.update(choices=list_cached_run_choices()),
         gr.update(interactive=True),
+        gr.update(),
     )
 
 
