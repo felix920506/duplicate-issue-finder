@@ -16,6 +16,7 @@ class CachedRun:
     result_markdown: str
     actions_html: str
     logs: str
+    status: str
     created_at: float
 
 
@@ -26,13 +27,12 @@ class RunCache(Protocol):
         result_markdown: str,
         actions_html: str,
         logs: str,
+        status: str,
     ) -> None: ...
 
     def get(self, run_id: str) -> CachedRun | None: ...
 
     def list_recent(self) -> list[CachedRun]: ...
-
-    def format_label(self, cached_run: CachedRun) -> str: ...
 
 
 class InMemoryRunCache:
@@ -47,6 +47,7 @@ class InMemoryRunCache:
         result_markdown: str,
         actions_html: str,
         logs: str,
+        status: str,
     ) -> None:
         run_id = build_cache_key(issue_url)
         cached = CachedRun(
@@ -55,6 +56,7 @@ class InMemoryRunCache:
             result_markdown=result_markdown,
             actions_html=actions_html,
             logs=logs,
+            status=status,
             created_at=time.time(),
         )
         with self._lock:
@@ -72,10 +74,6 @@ class InMemoryRunCache:
             runs = list(self._runs.values())
         runs.reverse()
         return runs
-
-    @staticmethod
-    def format_label(cached_run: CachedRun) -> str:
-        return format_cached_run_label(cached_run)
 
 
 class SQLiteRunCache:
@@ -95,6 +93,7 @@ class SQLiteRunCache:
                     result_markdown TEXT NOT NULL,
                     actions_html TEXT NOT NULL,
                     logs TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'Unknown',
                     created_at REAL NOT NULL
                 )
                 """
@@ -102,6 +101,12 @@ class SQLiteRunCache:
             self._connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_cached_runs_created_at ON cached_runs(created_at DESC)"
             )
+            try:
+                self._connection.execute(
+                    "ALTER TABLE cached_runs ADD COLUMN status TEXT NOT NULL DEFAULT 'Unknown'"
+                )
+            except sqlite3.OperationalError:
+                pass
             self._connection.commit()
 
     def store(
@@ -110,16 +115,17 @@ class SQLiteRunCache:
         result_markdown: str,
         actions_html: str,
         logs: str,
+        status: str,
     ) -> None:
         run_id = build_cache_key(issue_url)
         created_at = time.time()
         with self._lock:
             self._connection.execute(
                 """
-                INSERT INTO cached_runs (run_id, issue_url, result_markdown, actions_html, logs, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO cached_runs (run_id, issue_url, result_markdown, actions_html, logs, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (run_id, issue_url, result_markdown, actions_html, logs, created_at),
+                (run_id, issue_url, result_markdown, actions_html, logs, status, created_at),
             )
             overflow = self._connection.execute(
                 "SELECT COUNT(*) AS count FROM cached_runs"
@@ -142,7 +148,7 @@ class SQLiteRunCache:
         with self._lock:
             row = self._connection.execute(
                 """
-                SELECT run_id, issue_url, result_markdown, actions_html, logs, created_at
+                SELECT run_id, issue_url, result_markdown, actions_html, logs, status, created_at
                 FROM cached_runs
                 WHERE run_id = ?
                 """,
@@ -154,7 +160,7 @@ class SQLiteRunCache:
         with self._lock:
             rows = self._connection.execute(
                 """
-                SELECT run_id, issue_url, result_markdown, actions_html, logs, created_at
+                SELECT run_id, issue_url, result_markdown, actions_html, logs, status, created_at
                 FROM cached_runs
                 ORDER BY created_at DESC
                 LIMIT ?
@@ -162,10 +168,6 @@ class SQLiteRunCache:
                 (self.max_runs,),
             ).fetchall()
         return [row_to_cached_run(row) for row in rows]
-
-    @staticmethod
-    def format_label(cached_run: CachedRun) -> str:
-        return format_cached_run_label(cached_run)
 
 
 def create_run_cache(
@@ -197,6 +199,7 @@ def row_to_cached_run(row: sqlite3.Row) -> CachedRun:
         result_markdown=row["result_markdown"],
         actions_html=row["actions_html"],
         logs=row["logs"],
+        status=row["status"],
         created_at=float(row["created_at"]),
     )
 
@@ -205,7 +208,7 @@ def format_cached_run_label(cached_run: CachedRun) -> str:
     timestamp = time.strftime(
         "%Y-%m-%d %H:%M:%S", time.localtime(cached_run.created_at)
     )
-    return f"{timestamp} | {cached_run.issue_url}"
+    return f"{timestamp} | {cached_run.status} | {cached_run.issue_url}"
 
 
 def build_cache_key(issue_url: str) -> str:
