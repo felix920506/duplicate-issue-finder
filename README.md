@@ -2,7 +2,7 @@
 
 Read-only CLI and web UI that inspect a configured GitHub repository and determine whether a target issue is likely a duplicate of an existing issue.
 
-Disclosure: OpenAI Codex was used as part of the development process for this project.
+Disclosure: OpenAI Codex and Claude (Anthropic) were used as part of the development process for this project.
 
 The CLI runs a bounded agent loop. The agent receives the target issue body and comments, uses native tool calling for issue search and issue fetches, chooses between lexical, hybrid, and semantic GitHub issue search per query, and prints a final duplicate decision to stdout.
 
