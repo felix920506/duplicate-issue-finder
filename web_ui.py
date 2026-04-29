@@ -373,20 +373,20 @@ def build_demo() -> gr.Blocks:
             placeholder="https://github.com/owner/repo/issues/1234",
         )
 
-        recent_runs = gr.Dropdown(
-            label="Cached Runs",
-            choices=list_cached_run_choices(),
-            value=None,
-            allow_custom_value=False,
-        )
-        load_cached = gr.Button("Load cached run")
-
         run_button = gr.Button("Check for duplicates", variant="primary")
         result_markdown = gr.Markdown(
             label="Result",
             value="*Run a check or load a cached result to see output here.*",
         )
         actions_html = gr.HTML()
+        with gr.Accordion("Cached Runs", open=False):
+            recent_runs = gr.Dropdown(
+                label="Cached Runs",
+                choices=list_cached_run_choices(),
+                value=None,
+                allow_custom_value=False,
+            )
+            load_cached = gr.Button("Load cached run")
         with gr.Accordion("Run Logs", open=False):
             download_logs = gr.DownloadButton("Download logs")
             logs = gr.Textbox(
