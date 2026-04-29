@@ -382,7 +382,10 @@ def build_demo() -> gr.Blocks:
         load_cached = gr.Button("Load cached run")
 
         run_button = gr.Button("Check for duplicates", variant="primary")
-        result_markdown = gr.Markdown(label="Result")
+        result_markdown = gr.Markdown(
+            label="Result",
+            value="*Run a check or load a cached result to see output here.*",
+        )
         actions_html = gr.HTML()
         with gr.Accordion("Run Logs", open=False):
             download_logs = gr.DownloadButton("Download logs")
