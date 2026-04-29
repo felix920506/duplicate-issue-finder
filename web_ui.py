@@ -287,6 +287,8 @@ def run_from_ui(
             "",
             "",
             None,
+            gr.update(),
+            gr.update(),
         )
 
     logger.info(
@@ -335,13 +337,13 @@ def run_from_ui(
     thread.start()
 
     collected_logs: list[str] = []
-    yield "### Running...", "", "", None, gr.update()
+    yield "### Running...", "", "", None, gr.update(), gr.update(interactive=False)
 
     while thread.is_alive() or not log_queue.empty():
         try:
             line = log_queue.get(timeout=0.2)
             collected_logs.append(line)
-            yield "### Running...", "", "\n".join(collected_logs), None, gr.update()
+            yield "### Running...", "", "\n".join(collected_logs), None, gr.update(), gr.update(interactive=False)
         except queue.Empty:
             continue
 
@@ -352,6 +354,7 @@ def run_from_ui(
         logs,
         state["download_path"] if isinstance(state["download_path"], str) else None,
         gr.update(choices=list_cached_run_choices()),
+        gr.update(interactive=True),
     )
 
 
@@ -398,12 +401,12 @@ def build_demo() -> gr.Blocks:
         run_button.click(
             fn=run_from_ui,
             inputs=[issue_url],
-            outputs=[result_markdown, actions_html, logs, download_logs, recent_runs],
+            outputs=[result_markdown, actions_html, logs, download_logs, recent_runs, run_button],
         )
         issue_url.submit(
             fn=run_from_ui,
             inputs=[issue_url],
-            outputs=[result_markdown, actions_html, logs, download_logs, recent_runs],
+            outputs=[result_markdown, actions_html, logs, download_logs, recent_runs, run_button],
         )
         recent_runs.change(
             fn=load_cached_run,
