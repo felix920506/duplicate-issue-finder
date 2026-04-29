@@ -280,21 +280,34 @@ def build_action_buttons(result) -> str:
     if best_match_url is not None:
         original_and_best.append(best_match_url)
 
+    btn_style = (
+        "display:inline-flex;align-items:center;gap:0.4rem;"
+        "padding:0.5rem 1rem;"
+        "border-radius:var(--radius-sm,6px);"
+        "border:1px solid var(--border-color-primary,#e5e7eb);"
+        "background:var(--background-fill-secondary,#f9fafb);"
+        "color:var(--body-text-color,#374151);"
+        "font-size:var(--text-sm,0.875rem);"
+        "font-weight:500;"
+        "cursor:pointer;"
+        "transition:background 0.15s,border-color 0.15s;"
+        "white-space:nowrap;"
+    )
     return "\n".join(
         [
             '<div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin:0.5rem 0 1rem;">',
             (
-                '<button type="button" style="padding:0.5rem 0.9rem;cursor:pointer;" '
+                f'<button type="button" style="{btn_style}" '
                 f"data-open-urls='{json.dumps(original_and_best)}'>"
                 f"Open original{'' if best_match_url is None else ' + best match'}"
                 "</button>"
             ),
             (
-                '<button type="button" style="padding:0.5rem 0.9rem;cursor:pointer;" '
+                f'<button type="button" style="{btn_style}" '
                 f"data-open-urls='{json.dumps(all_urls)}'>Open all related issues</button>"
             ),
             "</div>",
-            '<div style="font-size:0.9rem;color:#666;margin:-0.25rem 0 1rem;">'
+            '<div style="font-size:0.85rem;color:var(--body-text-color-subdued,#6b7280);margin:-0.25rem 0 1rem;">'
             "Your browser may block opening multiple tabs at once and ask for confirmation."
             "</div>",
         ]
